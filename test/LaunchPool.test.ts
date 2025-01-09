@@ -36,6 +36,16 @@ describe("LaunchPool", function () {
       startTime,
       endTime,
       ethers.parseEther("100"),
+      ethers.parseEther("10"),
+      {
+        projectName: "Test Project",
+        website: "https://test.com",
+        logo: "https://test.com/logo.png",
+        discord: "https://discord.gg/test",
+        twitter: "https://twitter.com/test",
+        telegram: "https://t.me/test",
+        tokenInfo: "Test Token Info",
+      },
       admin.address
     );
 
@@ -119,6 +129,37 @@ describe("LaunchPool", function () {
         ethers.parseEther("100")
       );
       expect(await launchPool.hasUserLimit()).to.be.true;
+      expect(await launchPool.minStakeAmount()).to.equal(
+        ethers.parseEther("10")
+      );
+    });
+
+    it("Should not allow deposit below minimum stake amount", async function () {
+      await time.increaseTo(startTime);
+      await expect(
+        launchPool.connect(user1).deposit(ethers.parseEther("5"))
+      ).to.be.revertedWith("Amount below minimum stake");
+    });
+
+    it("Should allow admin to update minimum stake amount", async function () {
+      const newMinStake = ethers.parseEther("20");
+      await launchPool.connect(admin).updateMinStakeAmount(newMinStake);
+      expect(await launchPool.minStakeAmount()).to.equal(newMinStake);
+
+      await time.increaseTo(startTime);
+      await expect(
+        launchPool.connect(user1).deposit(ethers.parseEther("15"))
+      ).to.be.revertedWith("Amount below minimum stake");
+
+      await expect(
+        launchPool.connect(user1).deposit(ethers.parseEther("25"))
+      ).not.to.be.revertedWith("Amount below minimum stake");
+    });
+
+    it("Should not allow non-admin to update minimum stake amount", async function () {
+      await expect(
+        launchPool.connect(user1).updateMinStakeAmount(ethers.parseEther("20"))
+      ).to.be.revertedWith("Ownable: caller is not the owner");
     });
 
     it("Should not allow deposit before start time", async function () {

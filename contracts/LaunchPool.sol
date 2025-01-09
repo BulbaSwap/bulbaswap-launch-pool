@@ -34,6 +34,9 @@ contract LaunchPool is Ownable, ReentrancyGuard {
     // The pool limit (0 if none)
     uint256 public poolLimitPerUser;
 
+    // The minimum stake amount
+    uint256 public minStakeAmount;
+
     // Tokens created per second.
     uint256 public rewardPerSecond;
 
@@ -61,6 +64,7 @@ contract LaunchPool is Ownable, ReentrancyGuard {
     event NewStartAndEndTimes(uint256 startTime, uint256 endTime);
     event NewRewardPerSecond(uint256 rewardPerSecond);
     event NewPoolLimit(uint256 poolLimitPerUser);
+    event NewMinStakeAmount(uint256 minStakeAmount);
     event RewardsStop(uint256 timestamp);
     event Withdraw(address indexed user, uint256 amount);
     event RewardClaimed(address indexed user, uint256 amount);
@@ -77,6 +81,7 @@ contract LaunchPool is Ownable, ReentrancyGuard {
      * @param _startTime: start time
      * @param _endTime: end time
      * @param _poolLimitPerUser: pool limit per user in stakedToken (if any, else 0)
+     * @param _minStakeAmount: minimum amount that can be staked
      * @param _admin: admin address with ownership
      */
     function initialize(
@@ -86,6 +91,7 @@ contract LaunchPool is Ownable, ReentrancyGuard {
         uint256 _startTime,
         uint256 _endTime,
         uint256 _poolLimitPerUser,
+        uint256 _minStakeAmount,
         address _admin
     ) external {
         require(!isInitialized, "Already initialized");
@@ -104,6 +110,8 @@ contract LaunchPool is Ownable, ReentrancyGuard {
             hasUserLimit = true;
             poolLimitPerUser = _poolLimitPerUser;
         }
+
+        minStakeAmount = _minStakeAmount;
 
         uint256 decimalsRewardToken = IERC20Metadata(address(rewardToken)).decimals();
         require(decimalsRewardToken < 30, "Must be inferior to 30");
@@ -126,6 +134,7 @@ contract LaunchPool is Ownable, ReentrancyGuard {
 
         require(block.timestamp >= startTime, "Pool has not started");
         require(block.timestamp < endTime, "Pool has ended");
+        require(_amount >= minStakeAmount, "Amount below minimum stake");
 
         if (hasUserLimit) {
             require(_amount + user.amount <= poolLimitPerUser, "User amount above limit");
@@ -251,6 +260,7 @@ contract LaunchPool is Ownable, ReentrancyGuard {
      */
     function stopReward() external onlyOwner {
         endTime = block.timestamp;
+        emit RewardsStop(block.timestamp);
     }
 
     /*
@@ -269,6 +279,16 @@ contract LaunchPool is Ownable, ReentrancyGuard {
             poolLimitPerUser = 0;
         }
         emit NewPoolLimit(poolLimitPerUser);
+    }
+
+    /*
+     * @notice Update minimum stake amount
+     * @dev Only callable by owner.
+     * @param _minStakeAmount: the new minimum stake amount
+     */
+    function updateMinStakeAmount(uint256 _minStakeAmount) external onlyOwner {
+        minStakeAmount = _minStakeAmount;
+        emit NewMinStakeAmount(_minStakeAmount);
     }
 
     /*

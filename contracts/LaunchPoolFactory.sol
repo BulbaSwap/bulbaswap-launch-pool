@@ -6,7 +6,18 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./LaunchPool.sol";
 
 contract LaunchPoolFactory is Ownable {
-    event NewLaunchPool(address indexed launchPool);
+    struct PoolMetadata {
+        string projectName;
+        string website;
+        string logo;
+        string discord;
+        string twitter;
+        string telegram;
+        string tokenInfo;
+    }
+
+    event NewLaunchPool(address indexed launchPool, PoolMetadata metadata);
+    event PoolMetadataUpdated(address indexed launchPool, PoolMetadata metadata);
 
     /**
      * @notice Deploy a pool
@@ -16,6 +27,8 @@ contract LaunchPoolFactory is Ownable {
      * @param _startTime: start time
      * @param _endTime: end time
      * @param _poolLimitPerUser: pool limit per user in stakedToken (if any, else 0)
+     * @param _minStakeAmount: minimum amount that can be staked
+     * @param _metadata: pool metadata including project info and social links
      * @param _admin: admin address with ownership
      * @return address of new launch pool contract
      */
@@ -26,6 +39,8 @@ contract LaunchPoolFactory is Ownable {
         uint256 _startTime,
         uint256 _endTime,
         uint256 _poolLimitPerUser,
+        uint256 _minStakeAmount,
+        PoolMetadata calldata _metadata,
         address _admin
     ) external onlyOwner returns (address) {
         require(_stakedToken.totalSupply() >= 0, "Invalid staked token");
@@ -34,13 +49,9 @@ contract LaunchPoolFactory is Ownable {
         require(_startTime > block.timestamp, "Start time must be future");
         require(_endTime > _startTime, "End time must be after start time");
 
-        bytes memory bytecode = type(LaunchPool).creationCode;
         bytes32 salt = keccak256(abi.encodePacked(_stakedToken, _rewardToken, _startTime));
-        address launchPoolAddress;
-
-        assembly {
-            launchPoolAddress := create2(0, add(bytecode, 32), mload(bytecode), salt)
-        }
+        LaunchPool launchPool = new LaunchPool{salt: salt}();
+        address launchPoolAddress = address(launchPool);
 
         LaunchPool(launchPoolAddress).initialize(
             _stakedToken,
@@ -49,10 +60,19 @@ contract LaunchPoolFactory is Ownable {
             _startTime,
             _endTime,
             _poolLimitPerUser,
+            _minStakeAmount,
             _admin
         );
 
-        emit NewLaunchPool(launchPoolAddress);
+        emit NewLaunchPool(launchPoolAddress, _metadata);
         return launchPoolAddress;
+    }
+
+    function updatePoolMetadata(
+        address _launchPool,
+        PoolMetadata calldata _metadata
+    ) external onlyOwner {
+        require(_launchPool != address(0), "Invalid pool address");
+        emit PoolMetadataUpdated(_launchPool, _metadata);
     }
 }
