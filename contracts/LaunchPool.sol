@@ -6,18 +6,32 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "./LaunchPoolFactory.sol";
 
 contract LaunchPool is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
-    // The address of the smart chef factory
-    address public LAUNCH_POOL_FACTORY;
+    // Status constants
+    bytes32 private constant ACTIVE = keccak256(bytes("ACTIVE"));
+    bytes32 private constant PAUSED = keccak256(bytes("PAUSED"));
+    bytes32 private constant ENDED = keccak256(bytes("ENDED"));
+    bytes32 private constant DELISTED = keccak256(bytes("DELISTED"));
+    bytes32 private constant READY = keccak256(bytes("READY"));
+
+    // The address of the launch pool factory
+    address public immutable LAUNCH_POOL_FACTORY;
+
+    // The ID of the project this pool belongs to
+    uint256 public projectId;
 
     // Whether a limit is set for users
     bool public hasUserLimit;
 
     // Whether it is initialized
     bool public isInitialized;
+
+    // The factory contract
+    LaunchPoolFactory public immutable factory;
 
     // Accrued token per share
     uint256 public accTokenPerShare;
@@ -71,19 +85,9 @@ contract LaunchPool is Ownable, ReentrancyGuard {
 
     constructor() {
         LAUNCH_POOL_FACTORY = msg.sender;
+        factory = LaunchPoolFactory(msg.sender);
     }
 
-    /*
-     * @notice Initialize the contract
-     * @param _stakedToken: staked token address
-     * @param _rewardToken: reward token address
-     * @param _rewardPerSecond: reward per second (in rewardToken)
-     * @param _startTime: start time
-     * @param _endTime: end time
-     * @param _poolLimitPerUser: pool limit per user in stakedToken (if any, else 0)
-     * @param _minStakeAmount: minimum amount that can be staked
-     * @param _admin: admin address with ownership
-     */
     function initialize(
         IERC20 _stakedToken,
         IERC20 _rewardToken,
@@ -92,14 +96,15 @@ contract LaunchPool is Ownable, ReentrancyGuard {
         uint256 _endTime,
         uint256 _poolLimitPerUser,
         uint256 _minStakeAmount,
+        uint256 _projectId,
         address _admin
     ) external {
         require(!isInitialized, "Already initialized");
         require(msg.sender == LAUNCH_POOL_FACTORY, "Not factory");
 
-        // Make this contract initialized
         isInitialized = true;
 
+        projectId = _projectId;
         stakedToken = _stakedToken;
         rewardToken = _rewardToken;
         rewardPerSecond = _rewardPerSecond;
@@ -118,31 +123,27 @@ contract LaunchPool is Ownable, ReentrancyGuard {
 
         PRECISION_FACTOR = 10**(uint256(30) - decimalsRewardToken);
 
-        // Set the lastRewardTime as the startTime
         lastRewardTime = startTime;
 
-        // Transfer ownership to the admin address who becomes owner of the contract
         transferOwnership(_admin);
     }
 
-    /*
-     * @notice Deposit staked tokens
-     * @param _amount: amount to deposit (in stakedToken)
-     */
     function deposit(uint256 _amount) external nonReentrant {
         UserInfo storage user = userInfo[msg.sender];
 
-        require(block.timestamp >= startTime, "Pool has not started");
-        require(block.timestamp < endTime, "Pool has ended");
-        require(_amount >= minStakeAmount, "Amount below minimum stake");
+        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
+        require(statusHash == ACTIVE, "Pool not active");
 
-        if (hasUserLimit) {
-            require(_amount + user.amount <= poolLimitPerUser, "User amount above limit");
+        // Only check minimum stake amount when deposit amount is greater than 0
+        if (_amount > 0) {
+            require(_amount >= minStakeAmount, "Amount below minimum stake");
+            if (hasUserLimit) {
+                require(_amount + user.amount <= poolLimitPerUser, "User amount above limit");
+            }
         }
 
         _updatePool();
 
-        // Calculate pending rewards before deposit
         if (user.amount > 0) {
             uint256 pending = user.amount * accTokenPerShare / PRECISION_FACTOR - user.rewardDebt;
             if (pending > 0) {
@@ -160,17 +161,14 @@ contract LaunchPool is Ownable, ReentrancyGuard {
         emit Deposit(msg.sender, _amount);
     }
 
-    /*
-     * @notice Withdraw staked tokens
-     * @param _amount: amount to withdraw (in stakedToken)
-     */
     function withdraw(uint256 _amount) external nonReentrant {
         UserInfo storage user = userInfo[msg.sender];
+        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
+        require(statusHash != PAUSED && statusHash != DELISTED, "Pool not available");
         require(user.amount >= _amount, "Amount to withdraw too high");
 
         _updatePool();
 
-        // Calculate pending rewards before withdrawal
         uint256 pending = user.amount * accTokenPerShare / PRECISION_FACTOR - user.rewardDebt;
         if (pending > 0) {
             user.pendingRewards = user.pendingRewards + pending;
@@ -186,38 +184,28 @@ contract LaunchPool is Ownable, ReentrancyGuard {
         emit Withdraw(msg.sender, _amount);
     }
 
-    /*
-     * @notice Claim accumulated reward tokens
-     * @dev Only callable after pool has ended
-     */
     function claimReward() external nonReentrant {
-        require(block.timestamp > endTime, "Pool has not ended");
+        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
+        require(statusHash == ENDED, "Pool not ended");
         
         UserInfo storage user = userInfo[msg.sender];
         _updatePool();
 
-        // Calculate current pending rewards
         uint256 pending = user.amount * accTokenPerShare / PRECISION_FACTOR - user.rewardDebt;
-        
-        // Add historical pending rewards
         uint256 totalPending = pending + user.pendingRewards;
         require(totalPending > 0, "No rewards to claim");
 
-        // Reset pending rewards
         user.pendingRewards = 0;
         user.rewardDebt = user.amount * accTokenPerShare / PRECISION_FACTOR;
 
-        // Transfer rewards
         rewardToken.safeTransfer(msg.sender, totalPending);
 
         emit RewardClaimed(msg.sender, totalPending);
     }
 
-    /*
-     * @notice Withdraw staked tokens without caring about rewards
-     * @dev Needs to be for emergency.
-     */
     function emergencyWithdraw() external nonReentrant {
+        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
+        require(statusHash != PAUSED && statusHash != DELISTED, "Pool not available");
         UserInfo storage user = userInfo[msg.sender];
         uint256 amountToTransfer = user.amount;
         user.amount = 0;
@@ -231,21 +219,15 @@ contract LaunchPool is Ownable, ReentrancyGuard {
         emit EmergencyWithdraw(msg.sender, amountToTransfer);
     }
 
-    /*
-     * @notice Stop rewards
-     * @dev Only callable by owner. Needs to be for emergency.
-     */
     function emergencyRewardWithdraw(uint256 _amount) external onlyOwner {
+        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
+        require(statusHash == PAUSED || statusHash == DELISTED, "Pool must be paused or delisted");
         rewardToken.safeTransfer(msg.sender, _amount);
     }
 
-    /**
-     * @notice It allows the admin to recover wrong tokens sent to the contract
-     * @param _tokenAddress: the address of the token to withdraw
-     * @param _tokenAmount: the number of tokens to withdraw
-     * @dev This function is only callable by admin.
-     */
     function recoverWrongTokens(address _tokenAddress, uint256 _tokenAmount) external onlyOwner {
+        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
+        require(statusHash == PAUSED || statusHash == DELISTED, "Pool must be paused or delisted");
         require(_tokenAddress != address(stakedToken), "Cannot be staked token");
         require(_tokenAddress != address(rewardToken), "Cannot be reward token");
 
@@ -254,22 +236,16 @@ contract LaunchPool is Ownable, ReentrancyGuard {
         emit AdminTokenRecovery(_tokenAddress, _tokenAmount);
     }
 
-    /*
-     * @notice Stop rewards
-     * @dev Only callable by owner
-     */
     function stopReward() external onlyOwner {
+        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
+        require(statusHash == ACTIVE || statusHash == READY, "Pool not in active or ready state");
         endTime = block.timestamp;
         emit RewardsStop(block.timestamp);
     }
 
-    /*
-     * @notice Update pool limit per user
-     * @dev Only callable by owner.
-     * @param _hasUserLimit: whether the limit remains forced
-     * @param _poolLimitPerUser: new pool limit per user
-     */
     function updatePoolLimitPerUser(bool _hasUserLimit, uint256 _poolLimitPerUser) external onlyOwner {
+        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
+        require(statusHash == READY, "Pool not in ready state");
         require(hasUserLimit, "Must be set");
         if (_hasUserLimit) {
             require(_poolLimitPerUser > poolLimitPerUser, "New limit must be higher");
@@ -281,101 +257,134 @@ contract LaunchPool is Ownable, ReentrancyGuard {
         emit NewPoolLimit(poolLimitPerUser);
     }
 
-    /*
-     * @notice Update minimum stake amount
-     * @dev Only callable by owner.
-     * @param _minStakeAmount: the new minimum stake amount
-     */
     function updateMinStakeAmount(uint256 _minStakeAmount) external onlyOwner {
+        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
+        require(statusHash == READY, "Pool not in ready state");
         minStakeAmount = _minStakeAmount;
         emit NewMinStakeAmount(_minStakeAmount);
     }
 
-    /*
-     * @notice Update reward per second
-     * @dev Only callable by owner.
-     * @param _rewardPerSecond: the reward per second
-     */
     function updateRewardPerSecond(uint256 _rewardPerSecond) external onlyOwner {
-        require(block.timestamp < startTime, "Pool has started");
+        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
+        require(statusHash == READY, "Pool not in ready state");
         rewardPerSecond = _rewardPerSecond;
         emit NewRewardPerSecond(_rewardPerSecond);
     }
 
-    /**
-     * @notice It allows the admin to update start and end times
-     * @dev This function is only callable by owner.
-     * @param _startTime: the new start time
-     * @param _endTime: the new end time
-     */
     function updateStartAndEndTimes(uint256 _startTime, uint256 _endTime) external onlyOwner {
-        require(block.timestamp < startTime, "Pool has started");
+        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
+        require(statusHash == READY, "Pool not in ready state");
         require(_startTime < _endTime, "New startTime must be lower than new endTime");
         require(block.timestamp < _startTime, "New startTime must be higher than current timestamp");
 
         startTime = _startTime;
         endTime = _endTime;
-
-        // Set the lastRewardTime as the startTime
         lastRewardTime = startTime;
 
         emit NewStartAndEndTimes(_startTime, _endTime);
     }
 
-    /*
-     * @notice View function to see pending reward on frontend.
-     * @param _user: user address
-     * @return Total pending rewards for the user
-     */
     function pendingReward(address _user) external view returns (uint256) {
         UserInfo storage user = userInfo[_user];
         uint256 stakedTokenSupply = stakedToken.balanceOf(address(this));
         uint256 currentAccTokenPerShare = accTokenPerShare;
         
-        if (block.timestamp > lastRewardTime && stakedTokenSupply != 0) {
-            uint256 multiplier = _getMultiplier(lastRewardTime, block.timestamp);
-            uint256 reward = multiplier * rewardPerSecond;
-            currentAccTokenPerShare = currentAccTokenPerShare + 
-                reward * PRECISION_FACTOR / stakedTokenSupply;
+        // If current time is less than or equal to last reward time, return current rewards
+        if (block.timestamp <= lastRewardTime) {
+            return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
         }
+
+        // If current time is less than start time, return current rewards
+        if (block.timestamp < startTime) {
+            return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
+        }
+
+        // If last reward time is greater than or equal to end time, return current rewards
+        if (lastRewardTime >= endTime) {
+            return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
+        }
+
+        // If no staked tokens, return current rewards
+        if (stakedTokenSupply == 0) {
+            return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
+        }
+
+        // Calculate end point (not exceeding end time)
+        uint256 endPoint = block.timestamp > endTime ? endTime : block.timestamp;
         
-        uint256 currentPending = user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt;
-        return currentPending + user.pendingRewards;
+        // If last reward time is greater than or equal to end point, return current rewards
+        if (lastRewardTime >= endPoint) {
+            return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
+        }
+
+        // Calculate new rewards
+        uint256 multiplier = _getMultiplier(lastRewardTime, endPoint);
+        uint256 reward = multiplier * rewardPerSecond;
+        currentAccTokenPerShare = currentAccTokenPerShare + reward * PRECISION_FACTOR / stakedTokenSupply;
+        
+        return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
     }
 
-    /*
-     * @notice Update reward variables of the given pool to be up-to-date.
-     */
     function _updatePool() internal {
+        // If current time is less than or equal to last reward time, no update needed
         if (block.timestamp <= lastRewardTime) {
+            return;
+        }
+
+        // If current time is less than start time, update last reward time to start time
+        if (block.timestamp < startTime) {
+            lastRewardTime = startTime;
+            return;
+        }
+
+        // If last reward time is greater than or equal to end time, no update needed
+        if (lastRewardTime >= endTime) {
             return;
         }
 
         uint256 stakedTokenSupply = stakedToken.balanceOf(address(this));
 
+        // If no staked tokens, only update last reward time
         if (stakedTokenSupply == 0) {
-            lastRewardTime = block.timestamp;
+            lastRewardTime = block.timestamp > endTime ? endTime : block.timestamp;
             return;
         }
 
-        uint256 multiplier = _getMultiplier(lastRewardTime, block.timestamp);
+        // Calculate end point (not exceeding end time)
+        uint256 endPoint = block.timestamp > endTime ? endTime : block.timestamp;
+        
+        // If last reward time is greater than or equal to end point, no update needed
+        if (lastRewardTime >= endPoint) {
+            return;
+        }
+        
+        // Calculate and update rewards
+        uint256 multiplier = _getMultiplier(lastRewardTime, endPoint);
         uint256 reward = multiplier * rewardPerSecond;
         accTokenPerShare = accTokenPerShare + reward * PRECISION_FACTOR / stakedTokenSupply;
-        lastRewardTime = block.timestamp;
+        lastRewardTime = endPoint;
     }
 
-    /*
-     * @notice Return reward multiplier over the given _from to _to time.
-     * @param _from: time to start
-     * @param _to: time to finish
-     */
     function _getMultiplier(uint256 _from, uint256 _to) internal view returns (uint256) {
-        if (_to <= endTime) {
-            return _to - _from;
-        } else if (_from >= endTime) {
+        // If start time is after end time, no rewards
+        if (_from >= endTime) {
             return 0;
-        } else {
-            return endTime - _from;
         }
+        
+        // If end time is before start time, no rewards
+        if (_to <= startTime) {
+            return 0;
+        }
+        
+        // Adjust actual start and end times
+        uint256 actualFrom = _from < startTime ? startTime : _from;
+        uint256 actualTo = _to > endTime ? endTime : _to;
+        
+        // If adjusted start time is after adjusted end time, no rewards
+        if (actualFrom >= actualTo) {
+            return 0;
+        }
+        
+        return actualTo - actualFrom;
     }
 }
