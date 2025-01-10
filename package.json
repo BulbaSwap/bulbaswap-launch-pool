@@ -31,9 +31,7 @@
     "deploy:holesky": "hardhat run scripts/deploy.ts --network morphHolesky",
     "deploy:morph": "hardhat run scripts/deploy.ts --network morph",
     "verify:holesky": "hardhat verify --network morphHolesky $npm_config_address",
-    "verify:morph": "hardhat verify --network morph $npm_config_address",
-    "verify:pool:holesky": "hardhat verify --network morphHolesky --constructor-args arguments.js",
-    "verify:pool:morph": "hardhat verify --network morph --constructor-args arguments.js"
+    "verify:morph": "hardhat verify --network morph $npm_config_address"
   },
   "dependencies": {
     "@openzeppelin/contracts": "4.9.3"
