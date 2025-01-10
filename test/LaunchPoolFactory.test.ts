@@ -85,8 +85,12 @@ describe("LaunchPoolFactory", function () {
         .withArgs(0, 0); // STAGING status
 
       const projectId = (await factory.nextProjectId()) - 1n;
-      const pools = await factory.getProjectPools(projectId);
-      expect(pools.length).to.equal(1);
+      const poolInfos = await factory.getProjectPools(projectId);
+      expect(poolInfos.length).to.equal(1);
+      expect(poolInfos[0].stakedToken).to.equal(await testToken.getAddress());
+      expect(poolInfos[0].rewardToken).to.equal(await rewardToken.getAddress());
+      expect(poolInfos[0].poolLimitPerUser).to.equal(ethers.parseEther("100"));
+      expect(poolInfos[0].minStakeAmount).to.equal(ethers.parseEther("10"));
       expect(await factory.getProjectStatus(projectId)).to.equal("STAGING");
     });
 
@@ -125,8 +129,8 @@ describe("LaunchPoolFactory", function () {
       ).to.emit(factory, "NewProject");
 
       const projectId = (await factory.nextProjectId()) - 1n;
-      const pools = await factory.getProjectPools(projectId);
-      expect(pools.length).to.equal(0);
+      const poolInfos = await factory.getProjectPools(projectId);
+      expect(poolInfos.length).to.equal(0);
       expect(await factory.getProjectStatus(projectId)).to.equal("STAGING");
     });
 
@@ -176,11 +180,13 @@ describe("LaunchPoolFactory", function () {
       ).to.emit(factory, "NewLaunchPool");
 
       // Verify pool was created with correct reward amount
-      const pools = await factory.getProjectPools(projectId);
-      expect(pools.length).to.equal(1);
+      const poolInfos = await factory.getProjectPools(projectId);
+      expect(poolInfos.length).to.equal(1);
 
       const LaunchPool = await ethers.getContractFactory("LaunchPool");
-      const launchPool = LaunchPool.attach(pools[0]) as LaunchPool;
+      const launchPool = LaunchPool.attach(
+        poolInfos[0].poolAddress
+      ) as LaunchPool;
 
       // Calculate expected reward per second using the new helper function
       const expectedRewardPerSecond = await factory.calculateRewardPerSecond(
@@ -320,8 +326,8 @@ describe("LaunchPoolFactory", function () {
       expect(await factory.getProjectStatus(projectId)).to.equal("STAGING");
 
       // Fund the pool
-      const pools = await factory.getProjectPools(projectId);
-      const poolAddress = pools[0];
+      const poolInfos = await factory.getProjectPools(projectId);
+      const poolAddress = poolInfos[0].poolAddress;
       await rewardToken.mint(owner.address, ethers.parseEther("360"));
       await rewardToken
         .connect(owner)
@@ -424,16 +430,22 @@ describe("LaunchPoolFactory", function () {
       );
 
       const projectId = (await factory.nextProjectId()) - 1n;
-      const pools = await factory.getProjectPools(projectId);
+      const poolInfos = await factory.getProjectPools(projectId);
       const LaunchPool = await ethers.getContractFactory("LaunchPool");
-      const launchPool = LaunchPool.attach(pools[0]) as LaunchPool;
+      const launchPool = LaunchPool.attach(
+        poolInfos[0].poolAddress
+      ) as LaunchPool;
 
       // Fund the pool
       await rewardToken.mint(owner.address, ethers.parseEther("360"));
       await rewardToken
         .connect(owner)
         .approve(await factory.getAddress(), ethers.parseEther("360"));
-      await factory.fundPool(projectId, pools[0], ethers.parseEther("360"));
+      await factory.fundPool(
+        projectId,
+        poolInfos[0].poolAddress,
+        ethers.parseEther("360")
+      );
 
       return {
         factory,

@@ -57,16 +57,22 @@ describe("Access Control", function () {
     );
 
     const projectId = (await factory.nextProjectId()) - 1n;
-    const pools = await factory.getProjectPools(projectId);
+    const poolInfos = await factory.getProjectPools(projectId);
     const LaunchPool = await ethers.getContractFactory("LaunchPool");
-    const launchPool = LaunchPool.attach(pools[0]) as LaunchPool;
+    const launchPool = LaunchPool.attach(
+      poolInfos[0].poolAddress
+    ) as LaunchPool;
 
     // Mint and fund reward tokens
     await rewardToken.mint(owner.address, ethers.parseEther("360"));
     await rewardToken
       .connect(owner)
       .approve(await factory.getAddress(), ethers.parseEther("360"));
-    await factory.fundPool(projectId, pools[0], ethers.parseEther("360"));
+    await factory.fundPool(
+      projectId,
+      poolInfos[0].poolAddress,
+      ethers.parseEther("360")
+    );
 
     return {
       factory,

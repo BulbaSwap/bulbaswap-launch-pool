@@ -57,9 +57,11 @@ describe("LaunchPool", function () {
     );
 
     const projectId = (await factory.nextProjectId()) - 1n;
-    const pools = await factory.getProjectPools(projectId);
+    const poolInfos = await factory.getProjectPools(projectId);
     const LaunchPool = await ethers.getContractFactory("LaunchPool");
-    const launchPool = LaunchPool.attach(pools[0]) as LaunchPool;
+    const launchPool = LaunchPool.attach(
+      poolInfos[0].poolAddress
+    ) as LaunchPool;
 
     // Mint test tokens to users
     await testToken.mint(user1.address, ethers.parseEther("1000"));
@@ -70,7 +72,11 @@ describe("LaunchPool", function () {
     await rewardToken
       .connect(owner)
       .approve(await factory.getAddress(), ethers.parseEther("360"));
-    await factory.fundPool(projectId, pools[0], ethers.parseEther("360"));
+    await factory.fundPool(
+      projectId,
+      poolInfos[0].poolAddress,
+      ethers.parseEther("360")
+    );
 
     return {
       factory,

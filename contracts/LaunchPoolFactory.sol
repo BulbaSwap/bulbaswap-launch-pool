@@ -247,11 +247,40 @@ contract LaunchPoolFactory is Ownable {
         emit PoolMetadataUpdated(_projectId, _metadata);
     }
 
+    struct PoolInfo {
+        address poolAddress;
+        address stakedToken;
+        address rewardToken;
+        uint256 rewardPerSecond;
+        uint256 startTime;
+        uint256 endTime;
+        uint256 poolLimitPerUser;
+        uint256 minStakeAmount;
+    }
+
     /**
-     * @notice Get all pools in a project
+     * @notice Get all pools in a project with their information
      */
-    function getProjectPools(uint256 _projectId) external view returns (address[] memory) {
-        return projects[_projectId].pools;
+    function getProjectPools(uint256 _projectId) external view returns (PoolInfo[] memory) {
+        ProjectToken storage project = projects[_projectId];
+        address[] memory poolAddresses = project.pools;
+        PoolInfo[] memory poolInfos = new PoolInfo[](poolAddresses.length);
+        
+        for (uint256 i = 0; i < poolAddresses.length; i++) {
+            LaunchPool pool = LaunchPool(poolAddresses[i]);
+            poolInfos[i] = PoolInfo({
+                poolAddress: poolAddresses[i],
+                stakedToken: address(pool.stakedToken()),
+                rewardToken: address(pool.rewardToken()),
+                rewardPerSecond: pool.rewardPerSecond(),
+                startTime: pool.startTime(),
+                endTime: pool.endTime(),
+                poolLimitPerUser: pool.poolLimitPerUser(),
+                minStakeAmount: pool.minStakeAmount()
+            });
+        }
+        
+        return poolInfos;
     }
 
     /**
