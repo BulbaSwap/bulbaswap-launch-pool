@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./LaunchPoolFactory.sol";
 
-contract LaunchPool is Ownable, ReentrancyGuard {
+contract LaunchPool is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // Status constants
@@ -83,6 +82,11 @@ contract LaunchPool is Ownable, ReentrancyGuard {
     event Withdraw(address indexed user, uint256 amount);
     event RewardClaimed(address indexed user, uint256 amount);
 
+    modifier onlyProjectOwner() {
+        require(factory.isProjectOwner(projectId, msg.sender), "Not project owner");
+        _;
+    }
+
     constructor() {
         LAUNCH_POOL_FACTORY = msg.sender;
         factory = LaunchPoolFactory(msg.sender);
@@ -96,8 +100,7 @@ contract LaunchPool is Ownable, ReentrancyGuard {
         uint256 _endTime,
         uint256 _poolLimitPerUser,
         uint256 _minStakeAmount,
-        uint256 _projectId,
-        address _admin
+        uint256 _projectId
     ) external {
         require(!isInitialized, "Already initialized");
         require(msg.sender == LAUNCH_POOL_FACTORY, "Not factory");
@@ -124,8 +127,13 @@ contract LaunchPool is Ownable, ReentrancyGuard {
         PRECISION_FACTOR = 10**(uint256(30) - decimalsRewardToken);
 
         lastRewardTime = startTime;
+    }
 
-        transferOwnership(_admin);
+    /**
+     * @notice Get the owner of this pool (project owner)
+     */
+    function owner() external view returns (address) {
+        return factory.getProjectOwner(projectId);
     }
 
     function deposit(uint256 _amount) external nonReentrant {
@@ -219,13 +227,13 @@ contract LaunchPool is Ownable, ReentrancyGuard {
         emit EmergencyWithdraw(msg.sender, amountToTransfer);
     }
 
-    function emergencyRewardWithdraw(uint256 _amount) external onlyOwner {
+    function emergencyRewardWithdraw(uint256 _amount) external onlyProjectOwner {
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
         require(statusHash == PAUSED || statusHash == DELISTED, "Pool must be paused or delisted");
         rewardToken.safeTransfer(msg.sender, _amount);
     }
 
-    function recoverWrongTokens(address _tokenAddress, uint256 _tokenAmount) external onlyOwner {
+    function recoverWrongTokens(address _tokenAddress, uint256 _tokenAmount) external onlyProjectOwner {
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
         require(statusHash == PAUSED || statusHash == DELISTED, "Pool must be paused or delisted");
         require(_tokenAddress != address(stakedToken), "Cannot be staked token");
@@ -236,14 +244,14 @@ contract LaunchPool is Ownable, ReentrancyGuard {
         emit AdminTokenRecovery(_tokenAddress, _tokenAmount);
     }
 
-    function stopReward() external onlyOwner {
+    function stopReward() external onlyProjectOwner {
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
         require(statusHash == ACTIVE || statusHash == READY, "Pool not in active or ready state");
         endTime = block.timestamp;
         emit RewardsStop(block.timestamp);
     }
 
-    function updatePoolLimitPerUser(bool _hasUserLimit, uint256 _poolLimitPerUser) external onlyOwner {
+    function updatePoolLimitPerUser(bool _hasUserLimit, uint256 _poolLimitPerUser) external onlyProjectOwner {
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
         require(statusHash == READY, "Pool not in ready state");
         require(hasUserLimit, "Must be set");
@@ -257,21 +265,21 @@ contract LaunchPool is Ownable, ReentrancyGuard {
         emit NewPoolLimit(poolLimitPerUser);
     }
 
-    function updateMinStakeAmount(uint256 _minStakeAmount) external onlyOwner {
+    function updateMinStakeAmount(uint256 _minStakeAmount) external onlyProjectOwner {
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
         require(statusHash == READY, "Pool not in ready state");
         minStakeAmount = _minStakeAmount;
         emit NewMinStakeAmount(_minStakeAmount);
     }
 
-    function updateRewardPerSecond(uint256 _rewardPerSecond) external onlyOwner {
+    function updateRewardPerSecond(uint256 _rewardPerSecond) external onlyProjectOwner {
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
         require(statusHash == READY, "Pool not in ready state");
         rewardPerSecond = _rewardPerSecond;
         emit NewRewardPerSecond(_rewardPerSecond);
     }
 
-    function updateStartAndEndTimes(uint256 _startTime, uint256 _endTime) external onlyOwner {
+    function updateStartAndEndTimes(uint256 _startTime, uint256 _endTime) external onlyProjectOwner {
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
         require(statusHash == READY, "Pool not in ready state");
         require(_startTime < _endTime, "New startTime must be lower than new endTime");

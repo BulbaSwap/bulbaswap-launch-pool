@@ -6,7 +6,7 @@ import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
 describe("LaunchPool", function () {
   async function deployFixture() {
-    const [owner, admin, user1, user2] = await ethers.getSigners();
+    const [owner, projectOwner, user1, user2] = await ethers.getSigners();
 
     // Deploy factory contract
     const LaunchPoolFactory = await ethers.getContractFactory(
@@ -44,7 +44,6 @@ describe("LaunchPool", function () {
       poolRewardAmount: ethers.parseEther("360"), // 0.1 tokens per second * 3600 seconds
       poolLimitPerUser: ethers.parseEther("100"),
       minStakeAmount: ethers.parseEther("10"),
-      admin: admin.address,
     };
 
     await factory.createProject(
@@ -53,7 +52,8 @@ describe("LaunchPool", function () {
       startTime,
       endTime,
       metadata,
-      initialPool
+      initialPool,
+      projectOwner.address
     );
 
     const projectId = (await factory.nextProjectId()) - 1n;
@@ -68,15 +68,13 @@ describe("LaunchPool", function () {
     await testToken.mint(user2.address, ethers.parseEther("1000"));
 
     // Mint and fund reward tokens
-    await rewardToken.mint(owner.address, ethers.parseEther("360"));
+    await rewardToken.mint(projectOwner.address, ethers.parseEther("360"));
     await rewardToken
-      .connect(owner)
+      .connect(projectOwner)
       .approve(await factory.getAddress(), ethers.parseEther("360"));
-    await factory.fundPool(
-      projectId,
-      poolInfos[0].poolAddress,
-      ethers.parseEther("360")
-    );
+    await factory
+      .connect(projectOwner)
+      .fundPool(projectId, poolInfos[0].poolAddress, ethers.parseEther("360"));
 
     return {
       factory,
@@ -85,7 +83,7 @@ describe("LaunchPool", function () {
       launchPool,
       projectId,
       owner,
-      admin,
+      projectOwner,
       user1,
       user2,
       startTime,
@@ -99,7 +97,7 @@ describe("LaunchPool", function () {
     let testToken: MockToken;
     let rewardToken: MockToken;
     let projectId: bigint;
-    let admin: HardhatEthersSigner;
+    let projectOwner: HardhatEthersSigner;
     let user1: HardhatEthersSigner;
     let user2: HardhatEthersSigner;
     let startTime: number;
@@ -112,7 +110,7 @@ describe("LaunchPool", function () {
         testToken,
         rewardToken,
         projectId,
-        admin,
+        projectOwner,
         user1,
         user2,
         startTime,
@@ -131,7 +129,6 @@ describe("LaunchPool", function () {
     it("Should initialize with correct parameters and project ID", async function () {
       expect(await launchPool.isInitialized()).to.be.true;
       expect(await launchPool.projectId()).to.equal(projectId);
-      expect(await launchPool.owner()).to.equal(admin.address);
       expect(await launchPool.rewardToken()).to.equal(
         await rewardToken.getAddress()
       );
@@ -216,32 +213,31 @@ describe("LaunchPool", function () {
     let factory: LaunchPoolFactory;
     let launchPool: LaunchPool;
     let projectId: bigint;
-    let admin: HardhatEthersSigner;
+    let projectOwner: HardhatEthersSigner;
     let user1: HardhatEthersSigner;
 
     beforeEach(async function () {
-      ({ factory, launchPool, projectId, admin, user1 } = await loadFixture(
-        deployFixture
-      ));
+      ({ factory, launchPool, projectId, projectOwner, user1 } =
+        await loadFixture(deployFixture));
     });
 
-    it("Should allow admin to update pool parameters in READY state", async function () {
+    it("Should allow project owner to update pool parameters in READY state", async function () {
       await launchPool
-        .connect(admin)
+        .connect(projectOwner)
         .updateMinStakeAmount(ethers.parseEther("20"));
       expect(await launchPool.minStakeAmount()).to.equal(
         ethers.parseEther("20")
       );
 
       await launchPool
-        .connect(admin)
+        .connect(projectOwner)
         .updatePoolLimitPerUser(true, ethers.parseEther("200"));
       expect(await launchPool.poolLimitPerUser()).to.equal(
         ethers.parseEther("200")
       );
 
       await launchPool
-        .connect(admin)
+        .connect(projectOwner)
         .updateRewardPerSecond(ethers.parseEther("0.2"));
       expect(await launchPool.rewardPerSecond()).to.equal(
         ethers.parseEther("0.2")
@@ -252,31 +248,54 @@ describe("LaunchPool", function () {
       await time.increaseTo(await launchPool.startTime());
 
       await expect(
-        launchPool.connect(admin).updateMinStakeAmount(ethers.parseEther("20"))
+        launchPool
+          .connect(projectOwner)
+          .updateMinStakeAmount(ethers.parseEther("20"))
       ).to.be.revertedWith("Pool not in ready state");
 
-      await factory.updateProjectStatus(projectId, 3); // PAUSED
+      await factory.connect(projectOwner).updateProjectStatus(projectId, 3); // PAUSED
       await expect(
-        launchPool.connect(admin).updateMinStakeAmount(ethers.parseEther("20"))
+        launchPool
+          .connect(projectOwner)
+          .updateMinStakeAmount(ethers.parseEther("20"))
       ).to.be.revertedWith("Pool not in ready state");
     });
 
-    it("Should not allow non-admin to call admin functions", async function () {
+    it("Should not allow non-project-owner to call admin functions", async function () {
       await expect(
         launchPool.connect(user1).updateMinStakeAmount(ethers.parseEther("20"))
-      ).to.be.revertedWith("Ownable: caller is not the owner");
+      ).to.be.revertedWith("Not project owner");
 
       await expect(
         launchPool
           .connect(user1)
           .updatePoolLimitPerUser(true, ethers.parseEther("200"))
-      ).to.be.revertedWith("Ownable: caller is not the owner");
+      ).to.be.revertedWith("Not project owner");
 
       await expect(
         launchPool
           .connect(user1)
           .updateRewardPerSecond(ethers.parseEther("0.2"))
-      ).to.be.revertedWith("Ownable: caller is not the owner");
+      ).to.be.revertedWith("Not project owner");
+    });
+
+    it("Should respect project ownership transfer", async function () {
+      // Transfer project ownership to user1
+      await factory
+        .connect(projectOwner)
+        .transferProjectOwnership(projectId, user1.address);
+
+      // Old owner should not be able to update parameters
+      await expect(
+        launchPool
+          .connect(projectOwner)
+          .updateMinStakeAmount(ethers.parseEther("20"))
+      ).to.be.revertedWith("Not project owner");
+
+      // New owner should be able to update parameters
+      await expect(
+        launchPool.connect(user1).updateMinStakeAmount(ethers.parseEther("20"))
+      ).to.not.be.reverted;
     });
   });
 
@@ -286,6 +305,7 @@ describe("LaunchPool", function () {
     let rewardToken: MockToken;
     let testToken: MockToken;
     let projectId: bigint;
+    let projectOwner: HardhatEthersSigner;
     let user1: HardhatEthersSigner;
     let startTime: number;
     let endTime: number;
@@ -297,6 +317,7 @@ describe("LaunchPool", function () {
         rewardToken,
         testToken,
         projectId,
+        projectOwner,
         user1,
         startTime,
         endTime,
@@ -343,7 +364,7 @@ describe("LaunchPool", function () {
       );
 
       await time.increaseTo(endTime + 1);
-      await factory.updateProjectStatus(projectId, 3); // PAUSED
+      await factory.connect(projectOwner).updateProjectStatus(projectId, 3); // PAUSED
 
       await expect(launchPool.connect(user1).claimReward()).to.be.revertedWith(
         "Pool not ended"
