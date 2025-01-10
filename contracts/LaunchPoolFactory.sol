@@ -222,6 +222,14 @@ contract LaunchPoolFactory is Ownable {
         if (_status == ProjectStatus.READY) {
             require(project.status == ProjectStatus.STAGING, "Can only move to READY from STAGING");
             require(project.fundedPoolCount == project.pools.length, "Not all pools funded");
+            
+            // Calculate total rewards allocated to all pools
+            uint256 totalAllocated = 0;
+            for (uint256 i = 0; i < project.pools.length; i++) {
+                LaunchPool currentPool = LaunchPool(project.pools[i]);
+                totalAllocated += currentPool.rewardPerSecond() * (project.endTime - project.startTime);
+            }
+            require(totalAllocated == project.totalRewardAmount, "Total allocated rewards must match total");
         } else if (_status == ProjectStatus.DELISTED) {
             require(project.status == ProjectStatus.STAGING || 
                    project.status == ProjectStatus.READY, "Can only delist from STAGING or READY");
@@ -267,16 +275,16 @@ contract LaunchPoolFactory is Ownable {
         PoolInfo[] memory poolInfos = new PoolInfo[](poolAddresses.length);
         
         for (uint256 i = 0; i < poolAddresses.length; i++) {
-            LaunchPool pool = LaunchPool(poolAddresses[i]);
+            LaunchPool currentPool = LaunchPool(poolAddresses[i]);
             poolInfos[i] = PoolInfo({
                 poolAddress: poolAddresses[i],
-                stakedToken: address(pool.stakedToken()),
-                rewardToken: address(pool.rewardToken()),
-                rewardPerSecond: pool.rewardPerSecond(),
-                startTime: pool.startTime(),
-                endTime: pool.endTime(),
-                poolLimitPerUser: pool.poolLimitPerUser(),
-                minStakeAmount: pool.minStakeAmount()
+                stakedToken: address(currentPool.stakedToken()),
+                rewardToken: address(currentPool.rewardToken()),
+                rewardPerSecond: currentPool.rewardPerSecond(),
+                startTime: currentPool.startTime(),
+                endTime: currentPool.endTime(),
+                poolLimitPerUser: currentPool.poolLimitPerUser(),
+                minStakeAmount: currentPool.minStakeAmount()
             });
         }
         
@@ -309,8 +317,8 @@ contract LaunchPoolFactory is Ownable {
         require(project.status == ProjectStatus.STAGING, "Project not in staging");
         require(!project.poolFunded[_poolAddress], "Pool already funded");
         
-        LaunchPool pool = LaunchPool(_poolAddress);
-        require(pool.projectId() == _projectId, "Pool not in project");
+        LaunchPool launchPool = LaunchPool(_poolAddress);
+        require(launchPool.projectId() == _projectId, "Pool not in project");
         
         // Transfer reward tokens to pool
         project.rewardToken.transferFrom(msg.sender, _poolAddress, _amount);
@@ -322,6 +330,14 @@ contract LaunchPoolFactory is Ownable {
         
         // If all pools are funded, automatically transition to READY state
         if (project.fundedPoolCount == project.pools.length) {
+            // Calculate total rewards allocated to all pools
+            uint256 totalAllocated = 0;
+            for (uint256 i = 0; i < project.pools.length; i++) {
+                LaunchPool currentPool = LaunchPool(project.pools[i]);
+                totalAllocated += currentPool.rewardPerSecond() * (project.endTime - project.startTime);
+            }
+            require(totalAllocated == project.totalRewardAmount, "Total allocated rewards must match total");
+            
             project.status = ProjectStatus.READY;
             emit ProjectStatusUpdated(_projectId, ProjectStatus.READY);
         }

@@ -72,7 +72,7 @@ describe("LaunchPoolFactory", function () {
       await expect(
         factory.createProject(
           rewardToken,
-          ethers.parseEther("1000"),
+          ethers.parseEther("360"),
           startTime,
           endTime,
           metadata,
@@ -120,7 +120,7 @@ describe("LaunchPoolFactory", function () {
       await expect(
         factory.createProject(
           rewardToken,
-          ethers.parseEther("1000"),
+          ethers.parseEther("360"),
           startTime,
           endTime,
           metadata,
@@ -159,7 +159,7 @@ describe("LaunchPoolFactory", function () {
 
       await factory.createProject(
         rewardToken,
-        ethers.parseEther("1000"),
+        ethers.parseEther("360"),
         startTime,
         endTime,
         metadata,
@@ -229,7 +229,7 @@ describe("LaunchPoolFactory", function () {
           .connect(user)
           .createProject(
             rewardToken,
-            ethers.parseEther("1000"),
+            ethers.parseEther("360"),
             startTime,
             endTime,
             metadata,
@@ -264,7 +264,7 @@ describe("LaunchPoolFactory", function () {
       await expect(
         factory.createProject(
           rewardToken,
-          ethers.parseEther("1000"),
+          ethers.parseEther("360"),
           startTime,
           endTime,
           metadata,
@@ -311,7 +311,7 @@ describe("LaunchPoolFactory", function () {
 
       await factory.createProject(
         rewardToken,
-        ethers.parseEther("1000"),
+        ethers.parseEther("360"),
         startTime,
         endTime,
         metadata,
@@ -422,7 +422,7 @@ describe("LaunchPoolFactory", function () {
 
       await factory.createProject(
         rewardToken,
-        ethers.parseEther("1000"),
+        ethers.parseEther("360"),
         startTime,
         endTime,
         metadata,

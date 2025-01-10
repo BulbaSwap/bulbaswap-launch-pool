@@ -49,7 +49,7 @@ describe("Access Control", function () {
 
     await factory.createProject(
       rewardToken,
-      ethers.parseEther("1000"),
+      ethers.parseEther("360"),
       startTime,
       endTime,
       metadata,
@@ -129,7 +129,7 @@ describe("Access Control", function () {
           .connect(user1)
           .createProject(
             rewardToken,
-            ethers.parseEther("1000"),
+            ethers.parseEther("360"),
             startTime,
             endTime,
             metadata,
@@ -164,7 +164,7 @@ describe("Access Control", function () {
       await expect(
         factory.createProject(
           rewardToken,
-          ethers.parseEther("1000"),
+          ethers.parseEther("360"),
           startTime,
           endTime,
           metadata,
