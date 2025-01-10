@@ -15,6 +15,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^22.10.5",
     "chai": "^4.2.0",
+    "dotenv": "^16.4.7",
     "ethers": "^6.4.0",
     "hardhat": "^2.22.17",
     "hardhat-gas-reporter": "^2.2.2",
@@ -22,6 +23,17 @@
     "ts-node": "^10.9.2",
     "typechain": "^8.3.2",
     "typescript": "^5.7.2"
+  },
+  "scripts": {
+    "test": "npx hardhat test test/PointsRedemption.ts && npx hardhat test test/Claiming.ts",
+    "test:holesky": "npx hardhat test test/PointsRedemption.ts --network morphHolesky && npx hardhat test test/Claiming.ts --network morphHolesky",
+    "test:morph": "npx hardhat test test/PointsRedemption.ts --network morph && npx hardhat test test/Claiming.ts --network morph",
+    "deploy:holesky": "hardhat run scripts/deploy.ts --network morphHolesky",
+    "deploy:morph": "hardhat run scripts/deploy.ts --network morph",
+    "verify:holesky": "hardhat verify --network morphHolesky $npm_config_address",
+    "verify:morph": "hardhat verify --network morph $npm_config_address",
+    "verify:pool:holesky": "hardhat verify --network morphHolesky --constructor-args arguments.js",
+    "verify:pool:morph": "hardhat verify --network morph --constructor-args arguments.js"
   },
   "dependencies": {
     "@openzeppelin/contracts": "4.9.3"

@@ -41,7 +41,7 @@ describe("Access Control", function () {
 
     const initialPool = {
       stakedToken: testToken,
-      rewardPerSecond: ethers.parseEther("0.1"),
+      poolRewardAmount: ethers.parseEther("360"), // 0.1 tokens per second * 3600 seconds
       poolLimitPerUser: ethers.parseEther("100"),
       minStakeAmount: ethers.parseEther("10"),
       admin: admin.address,
@@ -112,9 +112,9 @@ describe("Access Control", function () {
 
       const emptyPool = {
         stakedToken: ethers.ZeroAddress,
-        rewardPerSecond: 0,
-        poolLimitPerUser: 0,
-        minStakeAmount: 0,
+        poolRewardAmount: 0n,
+        poolLimitPerUser: 0n,
+        minStakeAmount: 0n,
         admin: ethers.ZeroAddress,
       };
 
@@ -149,9 +149,9 @@ describe("Access Control", function () {
 
       const emptyPool = {
         stakedToken: ethers.ZeroAddress,
-        rewardPerSecond: 0,
-        poolLimitPerUser: 0,
-        minStakeAmount: 0,
+        poolRewardAmount: 0n,
+        poolLimitPerUser: 0n,
+        minStakeAmount: 0n,
         admin: ethers.ZeroAddress,
       };
 
@@ -172,7 +172,7 @@ describe("Access Control", function () {
         factory.addPoolToProject(
           projectId,
           testToken,
-          ethers.parseEther("0.1"),
+          ethers.parseEther("360"), // 0.1 tokens per second * 3600 seconds
           ethers.parseEther("100"),
           ethers.parseEther("10"),
           admin.address

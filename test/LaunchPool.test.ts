@@ -41,7 +41,7 @@ describe("LaunchPool", function () {
 
     const initialPool = {
       stakedToken: testToken,
-      rewardPerSecond: ethers.parseEther("0.1"),
+      poolRewardAmount: ethers.parseEther("360"), // 0.1 tokens per second * 3600 seconds
       poolLimitPerUser: ethers.parseEther("100"),
       minStakeAmount: ethers.parseEther("10"),
       admin: admin.address,

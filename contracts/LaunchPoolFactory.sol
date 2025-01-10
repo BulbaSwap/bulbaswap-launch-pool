@@ -115,19 +115,20 @@ contract LaunchPoolFactory is Ownable {
 
         // If initial pool parameters are provided, create initial pool
         if (address(_initialPool.stakedToken) != address(0)) {
+            require(_initialPool.poolRewardAmount <= _totalRewardAmount, "Pool reward exceeds total");
+            
+            // Calculate reward per second with ceiling division to ensure complete distribution
+            uint256 duration = _endTime - _startTime;
+            uint256 rewardPerSecond = (_initialPool.poolRewardAmount + duration - 1) / duration;
+            
             address poolAddress = _deployPool(
                 projectId,
                 _initialPool.stakedToken,
-                _initialPool.rewardPerSecond,
+                rewardPerSecond,
                 _initialPool.poolLimitPerUser,
                 _initialPool.minStakeAmount,
                 _initialPool.admin
             );
-
-            // Calculate required reward tokens for this pool
-            uint256 poolDuration = _endTime - _startTime;
-            uint256 poolRewardAmount = poolDuration * _initialPool.rewardPerSecond;
-            require(poolRewardAmount <= _totalRewardAmount, "Pool reward exceeds total");
             
             // Record funding requirement
             project.poolFunded[poolAddress] = false;
@@ -140,7 +141,7 @@ contract LaunchPoolFactory is Ownable {
      * @notice Add a new pool to existing project
      * @param _projectId: ID of the project
      * @param _stakedToken: staked token address
-     * @param _rewardPerSecond: reward per second (in rewardToken)
+     * @param _poolRewardAmount: total reward amount for this pool
      * @param _poolLimitPerUser: pool limit per user in stakedToken (if any, else 0)
      * @param _minStakeAmount: minimum amount that can be staked
      * @param _admin: admin address with ownership
@@ -149,7 +150,7 @@ contract LaunchPoolFactory is Ownable {
     function addPoolToProject(
         uint256 _projectId,
         IERC20 _stakedToken,
-        uint256 _rewardPerSecond,
+        uint256 _poolRewardAmount,
         uint256 _poolLimitPerUser,
         uint256 _minStakeAmount,
         address _admin
@@ -157,11 +158,16 @@ contract LaunchPoolFactory is Ownable {
         ProjectToken storage project = projects[_projectId];
         require(address(project.rewardToken) != address(0), "Project does not exist");
         require(project.status == ProjectStatus.STAGING, "Project not in staging");
+        require(_poolRewardAmount <= project.totalRewardAmount, "Pool reward exceeds total");
+
+        // Calculate reward per second with ceiling division to ensure complete distribution
+        uint256 duration = project.endTime - project.startTime;
+        uint256 rewardPerSecond = (_poolRewardAmount + duration - 1) / duration;
         
         return _deployPool(
             _projectId,
             _stakedToken,
-            _rewardPerSecond,
+            rewardPerSecond,
             _poolLimitPerUser,
             _minStakeAmount,
             _admin
@@ -249,6 +255,23 @@ contract LaunchPoolFactory is Ownable {
     }
 
     /**
+     * @notice Calculate reward per second for a given reward amount and duration
+     * @param _poolRewardAmount: total reward amount for the pool
+     * @param _startTime: start time
+     * @param _endTime: end time
+     * @return rewardPerSecond The calculated reward per second
+     */
+    function calculateRewardPerSecond(
+        uint256 _poolRewardAmount,
+        uint256 _startTime,
+        uint256 _endTime
+    ) public pure returns (uint256) {
+        require(_endTime > _startTime, "End time must be after start time");
+        uint256 duration = _endTime - _startTime;
+        return (_poolRewardAmount + duration - 1) / duration;
+    }
+
+    /**
      * @notice Fund a pool with reward tokens
      */
     function fundPool(uint256 _projectId, address _poolAddress, uint256 _amount) external onlyOwner {
@@ -280,7 +303,7 @@ contract LaunchPoolFactory is Ownable {
      */
     struct InitialPoolParams {
         IERC20 stakedToken;
-        uint256 rewardPerSecond;
+        uint256 poolRewardAmount;    // Total reward amount for the pool
         uint256 poolLimitPerUser;
         uint256 minStakeAmount;
         address admin;

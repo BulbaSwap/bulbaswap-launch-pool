@@ -1,4 +1,7 @@
 import { HardhatUserConfig } from "hardhat/config";
+import * as dotenv from "dotenv";
+
+dotenv.config();
 import "@nomicfoundation/hardhat-toolbox";
 import "@nomicfoundation/hardhat-chai-matchers";
 import "@nomicfoundation/hardhat-ethers";
@@ -36,18 +39,51 @@ const config: HardhatUserConfig = {
     ],
   },
   networks: {
-    hardhat: {
-      allowUnlimitedContractSize: true,
-      mining: {
-        auto: true,
-        interval: 0,
-        mempool: {
-          order: "fifo",
+    morph: {
+      url: "https://rpc.morphl2.io",
+      accounts: [
+        process.env.PRIVATE_KEY || "",
+        process.env.GLOBAL_SIGNER_PRIVATE_KEY || "",
+      ].filter((key) => key !== ""),
+      timeout: 60000,
+      gasPrice: "auto",
+    },
+    morphHolesky: {
+      url: "https://rpc-holesky.morphl2.io",
+      accounts: [
+        process.env.PRIVATE_KEY || "",
+        process.env.GLOBAL_SIGNER_PRIVATE_KEY || "",
+      ].filter((key) => key !== ""),
+      timeout: 60000,
+      gasPrice: "auto",
+    },
+  },
+  etherscan: {
+    apiKey: {
+      morph: "no-api-key-required",
+      morphHolesky: "no-api-key-required",
+    },
+    customChains: [
+      {
+        network: "morph",
+        chainId: 2818,
+        urls: {
+          apiURL: "https://explorer-api.morphl2.io/api",
+          browserURL: "https://explorer.morphl2.io",
         },
       },
-      hardfork: "shanghai",
-      allowBlocksWithSameTimestamp: true,
-    },
+      {
+        network: "morphHolesky",
+        chainId: 2810,
+        urls: {
+          apiURL: "https://explorer-api-holesky.morphl2.io/api",
+          browserURL: "https://explorer-holesky.morphl2.io",
+        },
+      },
+    ],
+  },
+  sourcify: {
+    enabled: true,
   },
   mocha: {
     timeout: 100000,
