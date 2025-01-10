@@ -348,26 +348,6 @@ describe("Access Control", function () {
         .withArgs(ethers.parseEther("0.2"));
     });
 
-    it("Should only allow project owner to update start and end times before start", async function () {
-      const now = await time.latest();
-      const newStartTime = now + 200;
-      const newEndTime = newStartTime + 3600;
-
-      await expect(
-        launchPool
-          .connect(user1)
-          .updateStartAndEndTimes(newStartTime, newEndTime)
-      ).to.be.revertedWith("Not project owner");
-
-      await expect(
-        launchPool
-          .connect(projectOwner)
-          .updateStartAndEndTimes(newStartTime, newEndTime)
-      )
-        .to.emit(launchPool, "NewStartAndEndTimes")
-        .withArgs(newStartTime, newEndTime);
-    });
-
     it("Should only allow project owner to perform emergency reward withdrawal", async function () {
       await factory.connect(projectOwner).updateProjectStatus(projectId, 3); // PAUSED
 

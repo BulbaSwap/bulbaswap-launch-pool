@@ -195,9 +195,8 @@ describe("LaunchPoolFactory", function () {
 
       // Calculate expected reward per second using the new helper function
       const expectedRewardPerSecond = await factory.calculateRewardPerSecond(
-        ethers.parseEther("360"),
-        startTime,
-        endTime
+        projectId,
+        ethers.parseEther("360")
       );
 
       expect(await launchPool.rewardPerSecond()).to.equal(

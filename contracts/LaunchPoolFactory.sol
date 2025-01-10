@@ -47,6 +47,30 @@ contract LaunchPoolFactory is Ownable {
     event PoolFunded(uint256 indexed projectId, address indexed pool);
     event ProjectOwnershipTransferred(uint256 indexed projectId, address indexed previousOwner, address indexed newOwner);
 
+    /**
+     * @notice Get project reward token
+     */
+    function getProjectRewardToken(uint256 _projectId) external view returns (IERC20) {
+        return projects[_projectId].rewardToken;
+    }
+
+    /**
+     * @notice Get project times
+     */
+    function getProjectTimes(uint256 _projectId) external view returns (uint256 startTime, uint256 endTime) {
+        ProjectToken storage project = projects[_projectId];
+        return (project.startTime, project.endTime);
+    }
+
+    /**
+     * @notice Calculate reward per second for a pool
+     */
+    function calculateRewardPerSecond(uint256 _projectId, uint256 _poolRewardAmount) public view returns (uint256) {
+        ProjectToken storage project = projects[_projectId];
+        uint256 duration = project.endTime - project.startTime;
+        return (_poolRewardAmount + duration - 1) / duration; // Ceiling division
+    }
+
     // Function to query project status
     function getProjectStatus(uint256 _projectId) public view returns (string memory) {
         ProjectToken storage project = projects[_projectId];
@@ -115,14 +139,10 @@ contract LaunchPoolFactory is Ownable {
         if (address(_initialPool.stakedToken) != address(0)) {
             require(_initialPool.poolRewardAmount <= _totalRewardAmount, "Pool reward exceeds total");
             
-            // Calculate reward per second with ceiling division to ensure complete distribution
-            uint256 duration = _endTime - _startTime;
-            uint256 rewardPerSecond = (_initialPool.poolRewardAmount + duration - 1) / duration;
-            
             address poolAddress = _deployPool(
                 projectId,
                 _initialPool.stakedToken,
-                rewardPerSecond,
+                _initialPool.poolRewardAmount,
                 _initialPool.poolLimitPerUser,
                 _initialPool.minStakeAmount
             );
@@ -149,15 +169,11 @@ contract LaunchPoolFactory is Ownable {
         require(address(project.rewardToken) != address(0), "Project does not exist");
         require(project.status == ProjectStatus.STAGING, "Project not in staging");
         require(_poolRewardAmount <= project.totalRewardAmount, "Pool reward exceeds total");
-
-        // Calculate reward per second with ceiling division to ensure complete distribution
-        uint256 duration = project.endTime - project.startTime;
-        uint256 rewardPerSecond = (_poolRewardAmount + duration - 1) / duration;
         
         return _deployPool(
             _projectId,
             _stakedToken,
-            rewardPerSecond,
+            _poolRewardAmount,
             _poolLimitPerUser,
             _minStakeAmount
         );
@@ -169,7 +185,7 @@ contract LaunchPoolFactory is Ownable {
     function _deployPool(
         uint256 _projectId,
         IERC20 _stakedToken,
-        uint256 _rewardPerSecond,
+        uint256 _poolRewardAmount,
         uint256 _poolLimitPerUser,
         uint256 _minStakeAmount
     ) internal returns (address) {
@@ -184,10 +200,7 @@ contract LaunchPoolFactory is Ownable {
 
         LaunchPool(launchPoolAddress).initialize(
             _stakedToken,
-            project.rewardToken,
-            _rewardPerSecond,
-            project.startTime,
-            project.endTime,
+            _poolRewardAmount,
             _poolLimitPerUser,
             _minStakeAmount,
             _projectId
@@ -215,7 +228,7 @@ contract LaunchPoolFactory is Ownable {
             uint256 totalAllocated = 0;
             for (uint256 i = 0; i < project.pools.length; i++) {
                 LaunchPool currentPool = LaunchPool(project.pools[i]);
-                totalAllocated += currentPool.rewardPerSecond() * (project.endTime - project.startTime);
+                totalAllocated += currentPool.poolRewardAmount();
             }
             require(totalAllocated == project.totalRewardAmount, "Total allocated rewards must match total");
         } else if (_status == ProjectStatus.DELISTED) {
@@ -296,29 +309,16 @@ contract LaunchPoolFactory is Ownable {
             poolInfos[i] = PoolInfo({
                 poolAddress: poolAddresses[i],
                 stakedToken: address(currentPool.stakedToken()),
-                rewardToken: address(currentPool.rewardToken()),
+                rewardToken: address(project.rewardToken),
                 rewardPerSecond: currentPool.rewardPerSecond(),
-                startTime: currentPool.startTime(),
-                endTime: currentPool.endTime(),
+                startTime: project.startTime,
+                endTime: project.endTime,
                 poolLimitPerUser: currentPool.poolLimitPerUser(),
                 minStakeAmount: currentPool.minStakeAmount()
             });
         }
         
         return poolInfos;
-    }
-
-    /**
-     * @notice Calculate reward per second for a given reward amount and duration
-     */
-    function calculateRewardPerSecond(
-        uint256 _poolRewardAmount,
-        uint256 _startTime,
-        uint256 _endTime
-    ) public pure returns (uint256) {
-        require(_endTime > _startTime, "End time must be after start time");
-        uint256 duration = _endTime - _startTime;
-        return (_poolRewardAmount + duration - 1) / duration;
     }
 
     /**
@@ -333,6 +333,7 @@ contract LaunchPoolFactory is Ownable {
         
         LaunchPool launchPool = LaunchPool(_poolAddress);
         require(launchPool.projectId() == _projectId, "Pool not in project");
+        require(launchPool.poolRewardAmount() == _amount, "Amount must match pool reward amount");
         
         // Transfer reward tokens to pool
         project.rewardToken.transferFrom(msg.sender, _poolAddress, _amount);
@@ -348,7 +349,7 @@ contract LaunchPoolFactory is Ownable {
             uint256 totalAllocated = 0;
             for (uint256 i = 0; i < project.pools.length; i++) {
                 LaunchPool currentPool = LaunchPool(project.pools[i]);
-                totalAllocated += currentPool.rewardPerSecond() * (project.endTime - project.startTime);
+                totalAllocated += currentPool.poolRewardAmount();
             }
             require(totalAllocated == project.totalRewardAmount, "Total allocated rewards must match total");
             

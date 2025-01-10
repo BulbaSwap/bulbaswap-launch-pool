@@ -135,11 +135,20 @@ describe("LaunchPool", function () {
       expect(await launchPool.stakedToken()).to.equal(
         await testToken.getAddress()
       );
-      expect(await launchPool.startTime()).to.equal(startTime);
-      expect(await launchPool.endTime()).to.equal(endTime);
-      expect(await launchPool.rewardPerSecond()).to.equal(
-        ethers.parseEther("0.1")
+
+      const [actualStartTime, actualEndTime] =
+        await launchPool.getProjectTimes();
+      expect(actualStartTime).to.equal(startTime);
+      expect(actualEndTime).to.equal(endTime);
+
+      const expectedRewardPerSecond = await factory.calculateRewardPerSecond(
+        projectId,
+        ethers.parseEther("360")
       );
+      expect(await launchPool.rewardPerSecond()).to.equal(
+        expectedRewardPerSecond
+      );
+
       expect(await launchPool.poolLimitPerUser()).to.equal(
         ethers.parseEther("100")
       );
@@ -245,7 +254,8 @@ describe("LaunchPool", function () {
     });
 
     it("Should not allow admin functions in wrong states", async function () {
-      await time.increaseTo(await launchPool.startTime());
+      const [startTime] = await launchPool.getProjectTimes();
+      await time.increaseTo(startTime);
 
       await expect(
         launchPool

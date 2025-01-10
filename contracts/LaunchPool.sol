@@ -35,12 +35,6 @@ contract LaunchPool is ReentrancyGuard {
     // Accrued token per share
     uint256 public accTokenPerShare;
 
-    // The time when reward mining ends.
-    uint256 public endTime;
-
-    // The time when reward mining starts.
-    uint256 public startTime;
-
     // The time of the last pool update
     uint256 public lastRewardTime;
 
@@ -50,14 +44,14 @@ contract LaunchPool is ReentrancyGuard {
     // The minimum stake amount
     uint256 public minStakeAmount;
 
-    // Tokens created per second.
+    // Total reward amount for this pool
+    uint256 public poolRewardAmount;
+
+    // Tokens created per second
     uint256 public rewardPerSecond;
 
     // The precision factor
     uint256 public PRECISION_FACTOR;
-
-    // The reward token
-    IERC20 public rewardToken;
 
     // The staked token
     IERC20 public stakedToken;
@@ -94,10 +88,7 @@ contract LaunchPool is ReentrancyGuard {
 
     function initialize(
         IERC20 _stakedToken,
-        IERC20 _rewardToken,
-        uint256 _rewardPerSecond,
-        uint256 _startTime,
-        uint256 _endTime,
+        uint256 _poolRewardAmount,
         uint256 _poolLimitPerUser,
         uint256 _minStakeAmount,
         uint256 _projectId
@@ -106,26 +97,26 @@ contract LaunchPool is ReentrancyGuard {
         require(msg.sender == LAUNCH_POOL_FACTORY, "Not factory");
 
         isInitialized = true;
-
         projectId = _projectId;
         stakedToken = _stakedToken;
-        rewardToken = _rewardToken;
-        rewardPerSecond = _rewardPerSecond;
-        startTime = _startTime;
-        endTime = _endTime;
+        poolRewardAmount = _poolRewardAmount;
+        minStakeAmount = _minStakeAmount;
 
         if (_poolLimitPerUser > 0) {
             hasUserLimit = true;
             poolLimitPerUser = _poolLimitPerUser;
         }
 
-        minStakeAmount = _minStakeAmount;
+        // Calculate reward per second using factory
+        rewardPerSecond = factory.calculateRewardPerSecond(projectId, _poolRewardAmount);
 
-        uint256 decimalsRewardToken = IERC20Metadata(address(rewardToken)).decimals();
+        // Set up precision factor
+        uint256 decimalsRewardToken = IERC20Metadata(address(rewardToken())).decimals();
         require(decimalsRewardToken < 30, "Must be inferior to 30");
-
         PRECISION_FACTOR = 10**(uint256(30) - decimalsRewardToken);
 
+        // Set last reward time to project start time
+        (uint256 startTime,) = getProjectTimes();
         lastRewardTime = startTime;
     }
 
@@ -134,6 +125,20 @@ contract LaunchPool is ReentrancyGuard {
      */
     function owner() external view returns (address) {
         return factory.getProjectOwner(projectId);
+    }
+
+    /**
+     * @notice Get the reward token from project
+     */
+    function rewardToken() public view returns (IERC20) {
+        return factory.getProjectRewardToken(projectId);
+    }
+
+    /**
+     * @notice Get project start and end times
+     */
+    function getProjectTimes() public view returns (uint256 startTime, uint256 endTime) {
+        return factory.getProjectTimes(projectId);
     }
 
     function deposit(uint256 _amount) external nonReentrant {
@@ -206,7 +211,7 @@ contract LaunchPool is ReentrancyGuard {
         user.pendingRewards = 0;
         user.rewardDebt = user.amount * accTokenPerShare / PRECISION_FACTOR;
 
-        rewardToken.safeTransfer(msg.sender, totalPending);
+        rewardToken().safeTransfer(msg.sender, totalPending);
 
         emit RewardClaimed(msg.sender, totalPending);
     }
@@ -230,14 +235,14 @@ contract LaunchPool is ReentrancyGuard {
     function emergencyRewardWithdraw(uint256 _amount) external onlyProjectOwner {
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
         require(statusHash == PAUSED || statusHash == DELISTED, "Pool must be paused or delisted");
-        rewardToken.safeTransfer(msg.sender, _amount);
+        rewardToken().safeTransfer(msg.sender, _amount);
     }
 
     function recoverWrongTokens(address _tokenAddress, uint256 _tokenAmount) external onlyProjectOwner {
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
         require(statusHash == PAUSED || statusHash == DELISTED, "Pool must be paused or delisted");
         require(_tokenAddress != address(stakedToken), "Cannot be staked token");
-        require(_tokenAddress != address(rewardToken), "Cannot be reward token");
+        require(_tokenAddress != address(rewardToken()), "Cannot be reward token");
 
         IERC20(_tokenAddress).safeTransfer(msg.sender, _tokenAmount);
 
@@ -247,6 +252,7 @@ contract LaunchPool is ReentrancyGuard {
     function stopReward() external onlyProjectOwner {
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
         require(statusHash == ACTIVE || statusHash == READY, "Pool not in active or ready state");
+        (,uint256 endTime) = getProjectTimes();
         endTime = block.timestamp;
         emit RewardsStop(block.timestamp);
     }
@@ -279,23 +285,11 @@ contract LaunchPool is ReentrancyGuard {
         emit NewRewardPerSecond(_rewardPerSecond);
     }
 
-    function updateStartAndEndTimes(uint256 _startTime, uint256 _endTime) external onlyProjectOwner {
-        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
-        require(statusHash == READY, "Pool not in ready state");
-        require(_startTime < _endTime, "New startTime must be lower than new endTime");
-        require(block.timestamp < _startTime, "New startTime must be higher than current timestamp");
-
-        startTime = _startTime;
-        endTime = _endTime;
-        lastRewardTime = startTime;
-
-        emit NewStartAndEndTimes(_startTime, _endTime);
-    }
-
     function pendingReward(address _user) external view returns (uint256) {
         UserInfo storage user = userInfo[_user];
         uint256 stakedTokenSupply = stakedToken.balanceOf(address(this));
         uint256 currentAccTokenPerShare = accTokenPerShare;
+        (uint256 startTime, uint256 endTime) = getProjectTimes();
         
         // If current time is less than or equal to last reward time, return current rewards
         if (block.timestamp <= lastRewardTime) {
@@ -334,6 +328,8 @@ contract LaunchPool is ReentrancyGuard {
     }
 
     function _updatePool() internal {
+        (uint256 startTime, uint256 endTime) = getProjectTimes();
+
         // If current time is less than or equal to last reward time, no update needed
         if (block.timestamp <= lastRewardTime) {
             return;
@@ -374,6 +370,8 @@ contract LaunchPool is ReentrancyGuard {
     }
 
     function _getMultiplier(uint256 _from, uint256 _to) internal view returns (uint256) {
+        (uint256 startTime, uint256 endTime) = getProjectTimes();
+
         // If start time is after end time, no rewards
         if (_from >= endTime) {
             return 0;
