@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./LaunchPool.sol";
 
-contract LaunchPoolFactory is Ownable {
+contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPSUpgradeable {
+    // Version management
+    uint256 public constant CURRENT_VERSION = 1;
+    mapping(address => uint256) public poolVersions;
+    
     struct PoolMetadata {
         string projectName;
         string website;
@@ -17,61 +23,119 @@ contract LaunchPoolFactory is Ownable {
     }
 
     enum ProjectStatus {
-        STAGING,    // Initial state, can add pools and fund them
-        READY,      // Funding completed, ready to start
-        DELISTED,   // Project delisted
-        PAUSED      // Project paused
+        STAGING,
+        READY,
+        DELISTED,
+        PAUSED
     }
 
     struct ProjectToken {
-        IERC20 rewardToken;          // Project reward token
-        uint256 totalRewardAmount;   // Total amount of tokens to be distributed
-        uint256 startTime;           // Project start time
-        uint256 endTime;             // Project end time
-        ProjectStatus status;        // Project status
-        address[] pools;             // All pool addresses in the project
-        mapping(address => bool) poolFunded;  // Whether pool is funded
-        uint256 fundedPoolCount;     // Number of funded pools
-        PoolMetadata metadata;       // Project metadata
-        address owner;               // Project owner address
+        IERC20 rewardToken;
+        uint256 totalRewardAmount;
+        uint256 startTime;
+        uint256 endTime;
+        ProjectStatus status;
+        address[] pools;
+        mapping(address => bool) poolFunded;
+        uint256 fundedPoolCount;
+        PoolMetadata metadata;
+        address owner;
     }
 
-    // Project mapping
+    // Storage variables
     mapping(uint256 => ProjectToken) public projects;
     uint256 public nextProjectId;
 
+    // Events
     event NewProject(uint256 indexed projectId, address indexed rewardToken, address indexed owner, PoolMetadata metadata);
-    event NewLaunchPool(uint256 indexed projectId, address indexed launchPool);
+    event NewLaunchPool(uint256 indexed projectId, address indexed launchPool, uint256 version);
     event ProjectStatusUpdated(uint256 indexed projectId, ProjectStatus status);
     event PoolMetadataUpdated(uint256 indexed projectId, PoolMetadata metadata);
     event PoolFunded(uint256 indexed projectId, address indexed pool);
     event ProjectOwnershipTransferred(uint256 indexed projectId, address indexed previousOwner, address indexed newOwner);
+    event FactoryUpgraded(address indexed implementation);
 
-    /**
-     * @notice Get project reward token
-     */
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() {
+        _disableInitializers();
+    }
+
+    function _init() internal virtual {
+        __Ownable_init();
+        __UUPSUpgradeable_init();
+        nextProjectId = 0;
+    }
+
+    function initialize() external virtual initializer {
+        _init();
+    }
+
+    // Required authorization check for UUPS
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {
+        emit FactoryUpgraded(newImplementation);
+    }
+
+    // Get pool version
+    function getPoolVersion(address pool) external view returns (uint256) {
+        require(poolVersions[pool] > 0, "Pool not found");
+        return poolVersions[pool];
+    }
+
+    // Check if pool was created by factory
+    function isPoolFromFactory(address pool) external view returns (bool) {
+        return poolVersions[pool] > 0;
+    }
+
+    function _deployPool(
+        uint256 _projectId,
+        IERC20 _stakedToken,
+        uint256 _poolRewardAmount,
+        uint256 _poolLimitPerUser,
+        uint256 _minStakeAmount
+    ) internal virtual returns (address) {
+        ProjectToken storage project = projects[_projectId];
+        require(address(_stakedToken) != address(project.rewardToken), "Tokens must be different");
+
+        bytes32 salt = keccak256(
+            abi.encodePacked(_projectId, _stakedToken, project.rewardToken, project.startTime)
+        );
+        
+        // Deploy pool
+        LaunchPool launchPool = new LaunchPool{salt: salt}();
+        address launchPoolAddress = address(launchPool);
+
+        // Initialize pool
+        LaunchPool(launchPoolAddress).initialize(
+            _stakedToken,
+            _poolRewardAmount,
+            _poolLimitPerUser,
+            _minStakeAmount,
+            _projectId
+        );
+
+        // Record pool version
+        poolVersions[launchPoolAddress] = CURRENT_VERSION;
+
+        project.pools.push(launchPoolAddress);
+        emit NewLaunchPool(_projectId, launchPoolAddress, CURRENT_VERSION);
+        return launchPoolAddress;
+    }
+
     function getProjectRewardToken(uint256 _projectId) external view returns (IERC20) {
         return projects[_projectId].rewardToken;
     }
 
-    /**
-     * @notice Get project times
-     */
     function getProjectTimes(uint256 _projectId) external view returns (uint256 startTime, uint256 endTime) {
         ProjectToken storage project = projects[_projectId];
         return (project.startTime, project.endTime);
     }
 
-    /**
-     * @notice Calculate reward per second for a pool
-     */
     function calculateRewardPerSecond(uint256 _projectId, uint256 _poolRewardAmount) public view returns (uint256) {
         ProjectToken storage project = projects[_projectId];
         uint256 duration = project.endTime - project.startTime;
         return (_poolRewardAmount + duration - 1) / duration; // Ceiling division
     }
 
-    // Function to query project status
     function getProjectStatus(uint256 _projectId) public view returns (string memory) {
         ProjectToken storage project = projects[_projectId];
         
@@ -82,7 +146,6 @@ contract LaunchPoolFactory is Ownable {
             return "PAUSED";
         }
         
-        // Only READY state can transition to ACTIVE or ENDED
         if (project.status == ProjectStatus.READY) {
             if (block.timestamp >= project.endTime) {
                 return "ENDED";
@@ -96,7 +159,6 @@ contract LaunchPoolFactory is Ownable {
         return "STAGING";
     }
 
-    // Check if project is active
     function isProjectActive(uint256 _projectId) public view returns (bool) {
         ProjectToken storage project = projects[_projectId];
         return project.status == ProjectStatus.READY &&
@@ -104,10 +166,7 @@ contract LaunchPoolFactory is Ownable {
                block.timestamp < project.endTime;
     }
 
-    /**
-     * @notice Create a new project with optional initial pool
-     */
-    function createProject(
+    function _createProject(
         IERC20 _rewardToken,
         uint256 _totalRewardAmount,
         uint256 _startTime,
@@ -115,7 +174,7 @@ contract LaunchPoolFactory is Ownable {
         PoolMetadata calldata _metadata,
         InitialPoolParams calldata _initialPool,
         address _projectOwner
-    ) external onlyOwner returns (uint256 projectId) {
+    ) internal virtual returns (uint256 projectId) {
         require(_rewardToken.totalSupply() >= 0, "Invalid reward token");
         require(_startTime > block.timestamp, "Start time must be future");
         require(_endTime > _startTime, "End time must be after start time");
@@ -154,9 +213,90 @@ contract LaunchPoolFactory is Ownable {
         return projectId;
     }
 
-    /**
-     * @notice Add a new pool to existing project
-     */
+    function createProject(
+        IERC20 _rewardToken,
+        uint256 _totalRewardAmount,
+        uint256 _startTime,
+        uint256 _endTime,
+        PoolMetadata calldata _metadata,
+        InitialPoolParams calldata _initialPool,
+        address _projectOwner
+    ) external onlyOwner returns (uint256) {
+        return _createProject(
+            _rewardToken,
+            _totalRewardAmount,
+            _startTime,
+            _endTime,
+            _metadata,
+            _initialPool,
+            _projectOwner
+        );
+    }
+
+    struct InitialPoolParams {
+        IERC20 stakedToken;
+        uint256 poolRewardAmount;
+        uint256 poolLimitPerUser;
+        uint256 minStakeAmount;
+    }
+
+    function updateProjectStatus(uint256 _projectId, ProjectStatus _status) external {
+        ProjectToken storage project = projects[_projectId];
+        require(msg.sender == project.owner, "Only project owner");
+        require(address(project.rewardToken) != address(0), "Project does not exist");
+        
+        if (_status == ProjectStatus.READY) {
+            require(project.status == ProjectStatus.STAGING, "Can only move to READY from STAGING");
+            require(project.fundedPoolCount == project.pools.length, "Not all pools funded");
+            
+            uint256 totalAllocated = 0;
+            for (uint256 i = 0; i < project.pools.length; i++) {
+                LaunchPool currentPool = LaunchPool(project.pools[i]);
+                totalAllocated += currentPool.poolRewardAmount();
+            }
+            require(totalAllocated == project.totalRewardAmount, "Total allocated rewards must match total");
+        } else if (_status == ProjectStatus.DELISTED) {
+            require(project.status == ProjectStatus.STAGING || 
+                   project.status == ProjectStatus.READY, "Can only delist from STAGING or READY");
+        } else if (_status == ProjectStatus.PAUSED) {
+            require(project.status == ProjectStatus.READY, "Can only pause from READY state");
+        } else if (_status == ProjectStatus.STAGING) {
+            require(project.status == ProjectStatus.PAUSED, "Can only move to STAGING from PAUSED");
+        }
+        
+        project.status = _status;
+        emit ProjectStatusUpdated(_projectId, _status);
+    }
+
+    function updateProjectMetadata(
+        uint256 _projectId,
+        PoolMetadata calldata _metadata
+    ) external {
+        ProjectToken storage project = projects[_projectId];
+        require(msg.sender == project.owner, "Only project owner");
+        require(address(project.rewardToken) != address(0), "Project does not exist");
+        project.metadata = _metadata;
+        emit PoolMetadataUpdated(_projectId, _metadata);
+    }
+
+    function transferProjectOwnership(uint256 _projectId, address _newOwner) external {
+        ProjectToken storage project = projects[_projectId];
+        require(msg.sender == project.owner, "Only project owner");
+        require(_newOwner != address(0), "New owner is zero address");
+        
+        address oldOwner = project.owner;
+        project.owner = _newOwner;
+        emit ProjectOwnershipTransferred(_projectId, oldOwner, _newOwner);
+    }
+
+    function getProjectOwner(uint256 _projectId) public virtual view returns (address) {
+        return projects[_projectId].owner;
+    }
+
+    function isProjectOwner(uint256 _projectId, address _address) public view returns (bool) {
+        return projects[_projectId].owner == _address;
+    }
+
     function addPoolToProject(
         uint256 _projectId,
         IERC20 _stakedToken,
@@ -179,126 +319,6 @@ contract LaunchPoolFactory is Ownable {
         );
     }
 
-    /**
-     * @notice Internal function to deploy a new pool
-     */
-    function _deployPool(
-        uint256 _projectId,
-        IERC20 _stakedToken,
-        uint256 _poolRewardAmount,
-        uint256 _poolLimitPerUser,
-        uint256 _minStakeAmount
-    ) internal returns (address) {
-        ProjectToken storage project = projects[_projectId];
-        require(address(_stakedToken) != address(project.rewardToken), "Tokens must be different");
-
-        bytes32 salt = keccak256(
-            abi.encodePacked(_projectId, _stakedToken, project.rewardToken, project.startTime)
-        );
-        LaunchPool launchPool = new LaunchPool{salt: salt}();
-        address launchPoolAddress = address(launchPool);
-
-        LaunchPool(launchPoolAddress).initialize(
-            _stakedToken,
-            _poolRewardAmount,
-            _poolLimitPerUser,
-            _minStakeAmount,
-            _projectId
-        );
-
-        project.pools.push(launchPoolAddress);
-        emit NewLaunchPool(_projectId, launchPoolAddress);
-        return launchPoolAddress;
-    }
-
-    /**
-     * @notice Update project status
-     */
-    function updateProjectStatus(uint256 _projectId, ProjectStatus _status) external {
-        ProjectToken storage project = projects[_projectId];
-        require(msg.sender == project.owner, "Only project owner");
-        require(address(project.rewardToken) != address(0), "Project does not exist");
-        
-        // Validate status transition
-        if (_status == ProjectStatus.READY) {
-            require(project.status == ProjectStatus.STAGING, "Can only move to READY from STAGING");
-            require(project.fundedPoolCount == project.pools.length, "Not all pools funded");
-            
-            // Calculate total rewards allocated to all pools
-            uint256 totalAllocated = 0;
-            for (uint256 i = 0; i < project.pools.length; i++) {
-                LaunchPool currentPool = LaunchPool(project.pools[i]);
-                totalAllocated += currentPool.poolRewardAmount();
-            }
-            require(totalAllocated == project.totalRewardAmount, "Total allocated rewards must match total");
-        } else if (_status == ProjectStatus.DELISTED) {
-            require(project.status == ProjectStatus.STAGING || 
-                   project.status == ProjectStatus.READY, "Can only delist from STAGING or READY");
-        } else if (_status == ProjectStatus.PAUSED) {
-            require(project.status == ProjectStatus.READY, "Can only pause from READY state");
-        } else if (_status == ProjectStatus.STAGING) {
-            require(project.status == ProjectStatus.PAUSED, "Can only move to STAGING from PAUSED");
-        }
-        
-        project.status = _status;
-        emit ProjectStatusUpdated(_projectId, _status);
-    }
-
-    /**
-     * @notice Update project metadata
-     */
-    function updateProjectMetadata(
-        uint256 _projectId,
-        PoolMetadata calldata _metadata
-    ) external {
-        ProjectToken storage project = projects[_projectId];
-        require(msg.sender == project.owner, "Only project owner");
-        require(address(project.rewardToken) != address(0), "Project does not exist");
-        project.metadata = _metadata;
-        emit PoolMetadataUpdated(_projectId, _metadata);
-    }
-
-    /**
-     * @notice Transfer project ownership
-     */
-    function transferProjectOwnership(uint256 _projectId, address _newOwner) external {
-        ProjectToken storage project = projects[_projectId];
-        require(msg.sender == project.owner, "Only project owner");
-        require(_newOwner != address(0), "New owner is zero address");
-        
-        address oldOwner = project.owner;
-        project.owner = _newOwner;
-        emit ProjectOwnershipTransferred(_projectId, oldOwner, _newOwner);
-    }
-
-    /**
-     * @notice Get project owner
-     */
-    function getProjectOwner(uint256 _projectId) external view returns (address) {
-        return projects[_projectId].owner;
-    }
-
-    /**
-     * @notice Check if sender is project owner
-     */
-    function isProjectOwner(uint256 _projectId, address _address) public view returns (bool) {
-        return projects[_projectId].owner == _address;
-    }
-
-    struct PoolInfo {
-        address poolAddress;
-        address stakedToken;
-        address rewardToken;
-        uint256 rewardPerSecond;
-        uint256 startTime;
-        uint256 endTime;
-        uint256 poolLimitPerUser;
-        uint256 minStakeAmount;
-    }
-
-    /**
-     * @notice Get all pools in a project with their information
-     */
     function getProjectPools(uint256 _projectId) external view returns (PoolInfo[] memory) {
         ProjectToken storage project = projects[_projectId];
         address[] memory poolAddresses = project.pools;
@@ -321,9 +341,6 @@ contract LaunchPoolFactory is Ownable {
         return poolInfos;
     }
 
-    /**
-     * @notice Fund a pool with reward tokens
-     */
     function fundPool(uint256 _projectId, address _poolAddress, uint256 _amount) external {
         ProjectToken storage project = projects[_projectId];
         require(msg.sender == project.owner, "Only project owner");
@@ -335,7 +352,6 @@ contract LaunchPoolFactory is Ownable {
         require(launchPool.projectId() == _projectId, "Pool not in project");
         require(launchPool.poolRewardAmount() == _amount, "Amount must match pool reward amount");
         
-        // Transfer reward tokens to pool
         project.rewardToken.transferFrom(msg.sender, _poolAddress, _amount);
         
         project.poolFunded[_poolAddress] = true;
@@ -343,9 +359,7 @@ contract LaunchPoolFactory is Ownable {
         
         emit PoolFunded(_projectId, _poolAddress);
         
-        // If all pools are funded, automatically transition to READY state
         if (project.fundedPoolCount == project.pools.length) {
-            // Calculate total rewards allocated to all pools
             uint256 totalAllocated = 0;
             for (uint256 i = 0; i < project.pools.length; i++) {
                 LaunchPool currentPool = LaunchPool(project.pools[i]);
@@ -358,12 +372,13 @@ contract LaunchPoolFactory is Ownable {
         }
     }
 
-    /**
-     * @notice Helper struct for initial pool creation
-     */
-    struct InitialPoolParams {
-        IERC20 stakedToken;
-        uint256 poolRewardAmount;    // Total reward amount for the pool
+    struct PoolInfo {
+        address poolAddress;
+        address stakedToken;
+        address rewardToken;
+        uint256 rewardPerSecond;
+        uint256 startTime;
+        uint256 endTime;
         uint256 poolLimitPerUser;
         uint256 minStakeAmount;
     }

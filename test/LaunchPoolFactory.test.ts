@@ -1,19 +1,25 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers, upgrades } from "hardhat";
 import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { LaunchPool, LaunchPoolFactory, MockToken } from "../typechain-types";
+import {
+  LaunchPool,
+  LaunchPoolFactoryUpgradeable,
+  MockToken,
+} from "../typechain-types";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
-describe("LaunchPoolFactory", function () {
+describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
   async function deployFixture() {
     const [owner, projectOwner, user] = await ethers.getSigners();
 
-    // Deploy factory contract
-    const LaunchPoolFactory = await ethers.getContractFactory(
-      "LaunchPoolFactory"
+    // Deploy factory contract with UUPS proxy
+    const Factory = await ethers.getContractFactory(
+      "LaunchPoolFactoryUpgradeable"
     );
-    const factory = await LaunchPoolFactory.deploy();
-    await factory.waitForDeployment();
+    const factory = (await upgrades.deployProxy(Factory, [], {
+      initializer: "initialize",
+      kind: "uups",
+    })) as LaunchPoolFactoryUpgradeable;
 
     // Deploy token contracts
     const MockToken = await ethers.getContractFactory("MockToken");
@@ -34,7 +40,7 @@ describe("LaunchPoolFactory", function () {
   });
 
   describe("Project and Pool Creation", function () {
-    let factory: LaunchPoolFactory;
+    let factory: LaunchPoolFactoryUpgradeable;
     let rewardToken: MockToken;
     let testToken: MockToken;
     let owner: HardhatEthersSigner;
@@ -279,7 +285,7 @@ describe("LaunchPoolFactory", function () {
   });
 
   describe("Project Management", function () {
-    let factory: LaunchPoolFactory;
+    let factory: LaunchPoolFactoryUpgradeable;
     let rewardToken: MockToken;
     let testToken: MockToken;
     let projectId: bigint;
@@ -432,7 +438,7 @@ describe("LaunchPoolFactory", function () {
   });
 
   describe("LaunchPool Integration", function () {
-    let factory: LaunchPoolFactory;
+    let factory: LaunchPoolFactoryUpgradeable;
     let rewardToken: MockToken;
     let testToken: MockToken;
     let launchPool: LaunchPool;

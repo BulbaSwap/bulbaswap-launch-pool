@@ -1,19 +1,25 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers, upgrades } from "hardhat";
 import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { LaunchPool, LaunchPoolFactory, MockToken } from "../typechain-types";
+import {
+  LaunchPool,
+  LaunchPoolFactoryUpgradeable,
+  MockToken,
+} from "../typechain-types";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
 describe("LaunchPool", function () {
   async function deployFixture() {
     const [owner, projectOwner, user1, user2] = await ethers.getSigners();
 
-    // Deploy factory contract
-    const LaunchPoolFactory = await ethers.getContractFactory(
-      "LaunchPoolFactory"
+    // Deploy factory contract with UUPS proxy
+    const Factory = await ethers.getContractFactory(
+      "LaunchPoolFactoryUpgradeable"
     );
-    const factory = await LaunchPoolFactory.deploy();
-    await factory.waitForDeployment();
+    const factory = (await upgrades.deployProxy(Factory, [], {
+      initializer: "initialize",
+      kind: "uups",
+    })) as LaunchPoolFactoryUpgradeable;
 
     // Deploy tokens
     const MockToken = await ethers.getContractFactory("MockToken");
@@ -92,7 +98,7 @@ describe("LaunchPool", function () {
   }
 
   describe("Basic Functions", function () {
-    let factory: LaunchPoolFactory;
+    let factory: LaunchPoolFactoryUpgradeable;
     let launchPool: LaunchPool;
     let testToken: MockToken;
     let rewardToken: MockToken;
@@ -219,7 +225,7 @@ describe("LaunchPool", function () {
   });
 
   describe("Admin Functions", function () {
-    let factory: LaunchPoolFactory;
+    let factory: LaunchPoolFactoryUpgradeable;
     let launchPool: LaunchPool;
     let projectId: bigint;
     let projectOwner: HardhatEthersSigner;
@@ -310,7 +316,7 @@ describe("LaunchPool", function () {
   });
 
   describe("Reward Claiming", function () {
-    let factory: LaunchPoolFactory;
+    let factory: LaunchPoolFactoryUpgradeable;
     let launchPool: LaunchPool;
     let rewardToken: MockToken;
     let testToken: MockToken;

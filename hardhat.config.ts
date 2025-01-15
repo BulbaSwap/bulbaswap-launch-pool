@@ -12,6 +12,7 @@ import "@nomicfoundation/hardhat-verify";
 import "@typechain/hardhat";
 import "hardhat-gas-reporter";
 import "solidity-coverage";
+import "@openzeppelin/hardhat-upgrades";
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -23,22 +24,18 @@ const config: HardhatUserConfig = {
             enabled: true,
             runs: 200,
           },
-          viaIR: true,
-        },
-      },
-      {
-        version: "0.8.28",
-        settings: {
-          optimizer: {
-            enabled: true,
-            runs: 200,
-          },
-          viaIR: true,
         },
       },
     ],
   },
+  paths: {
+    tests: "./test",
+    sources: "./contracts",
+  },
   networks: {
+    hardhat: {
+      allowUnlimitedContractSize: true,
+    },
     morph: {
       url: "https://rpc.morphl2.io",
       accounts: [

@@ -5,17 +5,17 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "./LaunchPoolFactory.sol";
+import "./LaunchPoolFactoryUpgradeable.sol";
 
 contract LaunchPool is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // Status constants
-    bytes32 private constant ACTIVE = keccak256(bytes("ACTIVE"));
-    bytes32 private constant PAUSED = keccak256(bytes("PAUSED"));
-    bytes32 private constant ENDED = keccak256(bytes("ENDED"));
-    bytes32 private constant DELISTED = keccak256(bytes("DELISTED"));
-    bytes32 private constant READY = keccak256(bytes("READY"));
+    bytes32 internal constant ACTIVE = keccak256(bytes("ACTIVE"));
+    bytes32 internal constant PAUSED = keccak256(bytes("PAUSED"));
+    bytes32 internal constant ENDED = keccak256(bytes("ENDED"));
+    bytes32 internal constant DELISTED = keccak256(bytes("DELISTED"));
+    bytes32 internal constant READY = keccak256(bytes("READY"));
 
     // The address of the launch pool factory
     address public immutable LAUNCH_POOL_FACTORY;
@@ -30,7 +30,7 @@ contract LaunchPool is ReentrancyGuard {
     bool public isInitialized;
 
     // The factory contract
-    LaunchPoolFactory public immutable factory;
+    LaunchPoolFactoryUpgradeable public immutable factory;
 
     // Accrued token per share
     uint256 public accTokenPerShare;
@@ -83,7 +83,7 @@ contract LaunchPool is ReentrancyGuard {
 
     constructor() {
         LAUNCH_POOL_FACTORY = msg.sender;
-        factory = LaunchPoolFactory(msg.sender);
+        factory = LaunchPoolFactoryUpgradeable(msg.sender);
     }
 
     function initialize(
@@ -92,7 +92,7 @@ contract LaunchPool is ReentrancyGuard {
         uint256 _poolLimitPerUser,
         uint256 _minStakeAmount,
         uint256 _projectId
-    ) external {
+    ) external virtual {
         require(!isInitialized, "Already initialized");
         require(msg.sender == LAUNCH_POOL_FACTORY, "Not factory");
 
@@ -141,7 +141,7 @@ contract LaunchPool is ReentrancyGuard {
         return factory.getProjectTimes(projectId);
     }
 
-    function deposit(uint256 _amount) external nonReentrant {
+    function deposit(uint256 _amount) external virtual nonReentrant {
         UserInfo storage user = userInfo[msg.sender];
 
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));

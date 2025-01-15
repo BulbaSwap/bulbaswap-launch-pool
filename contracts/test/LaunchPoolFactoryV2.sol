@@ -1,0 +1,125 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.28;
+
+import "../LaunchPoolFactoryUpgradeable.sol";
+import "./LaunchPoolV2.sol";
+
+contract LaunchPoolFactoryV2 is LaunchPoolFactoryUpgradeable {
+    // Add new features for V2
+    uint256 public maxProjectsPerOwner;
+    mapping(address => uint256) public ownerProjectCount;
+    bool public useV2Pools; // Flag to determine which version of pools to create
+
+    // Override internal initialization
+    function _init() internal virtual override {
+        super._init();
+        maxProjectsPerOwner = 2; // Default limit
+        useV2Pools = false; // Default to V1 pools
+    }
+
+    // Initialize V2
+    function initialize() external virtual override reinitializer(2) {
+        // Initialize project counts for existing projects
+        uint256 projectCount = nextProjectId;
+        for (uint256 i = 0; i < projectCount; i++) {
+            address projectOwner = super.getProjectOwner(i);
+            if (ownerProjectCount[projectOwner] == 0) {
+                ownerProjectCount[projectOwner] = 1;
+            } else {
+                ownerProjectCount[projectOwner]++;
+            }
+        }
+    }
+
+    // Override internal _createProject to add project count limit
+    function _createProject(
+        IERC20 _rewardToken,
+        uint256 _totalRewardAmount,
+        uint256 _startTime,
+        uint256 _endTime,
+        PoolMetadata calldata _metadata,
+        InitialPoolParams calldata _initialPool,
+        address _projectOwner
+    ) internal virtual override returns (uint256 projectId) {
+        require(
+            ownerProjectCount[_projectOwner] < maxProjectsPerOwner,
+            "Too many projects"
+        );
+        
+        projectId = super._createProject(
+            _rewardToken,
+            _totalRewardAmount,
+            _startTime,
+            _endTime,
+            _metadata,
+            _initialPool,
+            _projectOwner
+        );
+
+        // Update project count after successful creation
+        ownerProjectCount[_projectOwner] += 1;
+        return projectId;
+    }
+
+    // New functions for V2
+    function setMaxProjectsPerOwner(uint256 _max) external onlyOwner {
+        maxProjectsPerOwner = _max;
+    }
+
+    function setUseV2Pools(bool _useV2) external onlyOwner {
+        useV2Pools = _useV2;
+    }
+
+    function _deployPool(
+        uint256 _projectId,
+        IERC20 _stakedToken,
+        uint256 _poolRewardAmount,
+        uint256 _poolLimitPerUser,
+        uint256 _minStakeAmount
+    ) internal virtual override returns (address) {
+        ProjectToken storage project = projects[_projectId];
+        require(address(_stakedToken) != address(project.rewardToken), "Tokens must be different");
+
+        bytes32 salt = keccak256(
+            abi.encodePacked(_projectId, _stakedToken, project.rewardToken, project.startTime)
+        );
+        
+        address launchPoolAddress;
+        
+        if (useV2Pools) {
+            // Deploy V2 pool
+            LaunchPoolV2 launchPool = new LaunchPoolV2{salt: salt}();
+            launchPoolAddress = address(launchPool);
+
+            // Initialize V2 pool with default max participants
+            LaunchPoolV2(launchPoolAddress).initialize(
+                _stakedToken,
+                _poolRewardAmount,
+                _poolLimitPerUser,
+                _minStakeAmount,
+                _projectId,
+                100 // Default max participants for V2
+            );
+        } else {
+            // Deploy V1 pool
+            LaunchPool launchPool = new LaunchPool{salt: salt}();
+            launchPoolAddress = address(launchPool);
+
+            // Initialize V1 pool
+            LaunchPool(launchPoolAddress).initialize(
+                _stakedToken,
+                _poolRewardAmount,
+                _poolLimitPerUser,
+                _minStakeAmount,
+                _projectId
+            );
+        }
+
+        // Record pool version
+        poolVersions[launchPoolAddress] = CURRENT_VERSION;
+
+        project.pools.push(launchPoolAddress);
+        emit NewLaunchPool(_projectId, launchPoolAddress, CURRENT_VERSION);
+        return launchPoolAddress;
+    }
+}

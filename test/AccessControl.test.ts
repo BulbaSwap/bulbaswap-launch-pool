@@ -1,19 +1,25 @@
 import { expect } from "chai";
-import { ethers } from "hardhat";
+import { ethers, upgrades } from "hardhat";
 import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
-import { LaunchPool, LaunchPoolFactory, MockToken } from "../typechain-types";
+import {
+  LaunchPool,
+  LaunchPoolFactoryUpgradeable,
+  MockToken,
+} from "../typechain-types";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
 describe("Access Control", function () {
   async function deployFixture() {
     const [owner, projectOwner, user1] = await ethers.getSigners();
 
-    // Deploy factory contract
-    const LaunchPoolFactory = await ethers.getContractFactory(
-      "LaunchPoolFactory"
+    // Deploy factory contract with UUPS proxy
+    const Factory = await ethers.getContractFactory(
+      "LaunchPoolFactoryUpgradeable"
     );
-    const factory = await LaunchPoolFactory.deploy();
-    await factory.waitForDeployment();
+    const factory = (await upgrades.deployProxy(Factory, [], {
+      initializer: "initialize",
+      kind: "uups",
+    })) as LaunchPoolFactoryUpgradeable;
 
     // Deploy tokens
     const MockToken = await ethers.getContractFactory("MockToken");
@@ -87,7 +93,7 @@ describe("Access Control", function () {
   }
 
   describe("LaunchPoolFactory Access Control", function () {
-    let factory: LaunchPoolFactory;
+    let factory: LaunchPoolFactoryUpgradeable;
     let rewardToken: MockToken;
     let testToken: MockToken;
     let owner: HardhatEthersSigner;
@@ -249,7 +255,7 @@ describe("Access Control", function () {
   });
 
   describe("LaunchPool Access Control", function () {
-    let factory: LaunchPoolFactory;
+    let factory: LaunchPoolFactoryUpgradeable;
     let launchPool: LaunchPool;
     let projectId: bigint;
     let projectOwner: HardhatEthersSigner;
