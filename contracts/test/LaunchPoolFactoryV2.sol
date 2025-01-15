@@ -3,8 +3,12 @@ pragma solidity 0.8.28;
 
 import "../LaunchPoolFactoryUpgradeable.sol";
 import "./LaunchPoolV2.sol";
+import "../libraries/Events.sol";
+import "../libraries/VersionLib.sol";
 
 contract LaunchPoolFactoryV2 is LaunchPoolFactoryUpgradeable {
+    using VersionLib for mapping(address => uint256);
+
     // Add new features for V2
     uint256 public maxProjectsPerOwner;
     mapping(address => uint256) public ownerProjectCount;
@@ -116,10 +120,10 @@ contract LaunchPoolFactoryV2 is LaunchPoolFactoryUpgradeable {
         }
 
         // Record pool version
-        poolVersions[launchPoolAddress] = CURRENT_VERSION;
+        poolVersions.recordPoolVersion(launchPoolAddress, CURRENT_VERSION);
 
         project.pools.push(launchPoolAddress);
-        emit NewLaunchPool(_projectId, launchPoolAddress, CURRENT_VERSION);
+        emit Events.NewLaunchPool(_projectId, launchPoolAddress, CURRENT_VERSION);
         return launchPoolAddress;
     }
 }

@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./LaunchPoolFactoryUpgradeable.sol";
+import "./libraries/PoolLib.sol";
 
 contract LaunchPool is ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -120,23 +121,14 @@ contract LaunchPool is ReentrancyGuard {
         lastRewardTime = startTime;
     }
 
-    /**
-     * @notice Get the owner of this pool (project owner)
-     */
     function owner() external view returns (address) {
         return factory.getProjectOwner(projectId);
     }
 
-    /**
-     * @notice Get the reward token from project
-     */
     function rewardToken() public view returns (IERC20) {
         return factory.getProjectRewardToken(projectId);
     }
 
-    /**
-     * @notice Get project start and end times
-     */
     function getProjectTimes() public view returns (uint256 startTime, uint256 endTime) {
         return factory.getProjectTimes(projectId);
     }
@@ -320,7 +312,7 @@ contract LaunchPool is ReentrancyGuard {
         }
 
         // Calculate new rewards
-        uint256 multiplier = _getMultiplier(lastRewardTime, endPoint);
+        uint256 multiplier = PoolLib.getMultiplier(lastRewardTime, endPoint, startTime, endTime);
         uint256 reward = multiplier * rewardPerSecond;
         currentAccTokenPerShare = currentAccTokenPerShare + reward * PRECISION_FACTOR / stakedTokenSupply;
         
@@ -329,68 +321,18 @@ contract LaunchPool is ReentrancyGuard {
 
     function _updatePool() internal {
         (uint256 startTime, uint256 endTime) = getProjectTimes();
-
-        // If current time is less than or equal to last reward time, no update needed
-        if (block.timestamp <= lastRewardTime) {
-            return;
-        }
-
-        // If current time is less than start time, update last reward time to start time
-        if (block.timestamp < startTime) {
-            lastRewardTime = startTime;
-            return;
-        }
-
-        // If last reward time is greater than or equal to end time, no update needed
-        if (lastRewardTime >= endTime) {
-            return;
-        }
-
-        uint256 stakedTokenSupply = stakedToken.balanceOf(address(this));
-
-        // If no staked tokens, only update last reward time
-        if (stakedTokenSupply == 0) {
-            lastRewardTime = block.timestamp > endTime ? endTime : block.timestamp;
-            return;
-        }
-
-        // Calculate end point (not exceeding end time)
-        uint256 endPoint = block.timestamp > endTime ? endTime : block.timestamp;
         
-        // If last reward time is greater than or equal to end point, no update needed
-        if (lastRewardTime >= endPoint) {
-            return;
-        }
-        
-        // Calculate and update rewards
-        uint256 multiplier = _getMultiplier(lastRewardTime, endPoint);
-        uint256 reward = multiplier * rewardPerSecond;
-        accTokenPerShare = accTokenPerShare + reward * PRECISION_FACTOR / stakedTokenSupply;
-        lastRewardTime = endPoint;
-    }
+        (uint256 newAccTokenPerShare, uint256 newLastRewardTime) = PoolLib.updatePool(
+            accTokenPerShare,
+            lastRewardTime,
+            rewardPerSecond,
+            startTime,
+            endTime,
+            PRECISION_FACTOR,
+            stakedToken
+        );
 
-    function _getMultiplier(uint256 _from, uint256 _to) internal view returns (uint256) {
-        (uint256 startTime, uint256 endTime) = getProjectTimes();
-
-        // If start time is after end time, no rewards
-        if (_from >= endTime) {
-            return 0;
-        }
-        
-        // If end time is before start time, no rewards
-        if (_to <= startTime) {
-            return 0;
-        }
-        
-        // Adjust actual start and end times
-        uint256 actualFrom = _from < startTime ? startTime : _from;
-        uint256 actualTo = _to > endTime ? endTime : _to;
-        
-        // If adjusted start time is after adjusted end time, no rewards
-        if (actualFrom >= actualTo) {
-            return 0;
-        }
-        
-        return actualTo - actualFrom;
+        accTokenPerShare = newAccTokenPerShare;
+        lastRewardTime = newLastRewardTime;
     }
 }
