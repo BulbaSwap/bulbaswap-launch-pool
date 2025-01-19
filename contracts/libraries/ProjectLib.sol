@@ -53,7 +53,7 @@ library ProjectLib {
             
             uint256 totalAllocated = 0;
             for (uint256 i = 0; i < project.pools.length; i++) {
-                LaunchPool currentPool = LaunchPool(project.pools[i]);
+                LaunchPool currentPool = LaunchPool(payable(project.pools[i]));
                 totalAllocated += currentPool.poolRewardAmount();
             }
             require(totalAllocated == project.totalRewardAmount, "Total allocated rewards must match total");

@@ -34,7 +34,9 @@
     "upgrade:holesky": "hardhat run scripts/upgrade.ts --network morphHolesky",
     "upgrade:morph": "hardhat run scripts/upgrade.ts --network morph",
     "verify:holesky": "hardhat verify --network morphHolesky $npm_config_address",
-    "verify:morph": "hardhat verify --network morph $npm_config_address"
+    "verify:morph": "hardhat verify --network morph $npm_config_address",
+    "verify:all:holesky": "hardhat run scripts/verify.ts --network morphHolesky",
+    "verify:all:morph": "hardhat run scripts/verify.ts --network morph"
   },
   "dependencies": {
     "@openzeppelin/contracts": "4.9.3",

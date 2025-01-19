@@ -1,607 +1,261 @@
 import { expect } from "chai";
 import { ethers, upgrades } from "hardhat";
-import { Contract } from "ethers";
 import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import {
+  LaunchPool,
+  LaunchPoolV2,
   LaunchPoolFactoryUpgradeable,
-  MockToken,
   LaunchPoolFactoryV2,
   LaunchPoolFactoryV3,
-  LaunchPool,
+  MockToken,
 } from "../typechain-types";
+import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
-describe("LaunchPoolFactoryUpgradeable", function () {
-  async function deployFixture() {
+describe("LaunchPoolFactoryUpgradeable (Upgrades)", function () {
+  async function deployV1Fixture() {
     const [owner, projectOwner, user] = await ethers.getSigners();
 
-    // Deploy mock tokens
-    const MockToken = await ethers.getContractFactory("MockToken");
-    const rewardToken = await MockToken.deploy();
-    await rewardToken.waitForDeployment();
+    // Deploy LaunchPool implementation
+    const LaunchPool = await ethers.getContractFactory("LaunchPool");
+    const launchPoolImpl = await LaunchPool.deploy();
+    await launchPoolImpl.waitForDeployment();
 
-    const testToken = await MockToken.deploy();
-    await testToken.waitForDeployment();
-
-    // Deploy factory with UUPS proxy
+    // Deploy factory contract with UUPS proxy
     const Factory = await ethers.getContractFactory(
       "LaunchPoolFactoryUpgradeable"
     );
-    const factory = (await upgrades.deployProxy(Factory, [], {
-      initializer: "initialize",
-      kind: "uups",
-    })) as LaunchPoolFactoryUpgradeable;
+    const factory = (await upgrades.deployProxy(
+      Factory,
+      [await launchPoolImpl.getAddress()],
+      {
+        initializer: "initialize",
+        kind: "uups",
+      }
+    )) as LaunchPoolFactoryUpgradeable;
 
-    const proxyAddress = await factory.getAddress();
+    // Deploy token contracts for testing
+    const MockToken = await ethers.getContractFactory("MockToken");
+    const rewardToken = await MockToken.deploy();
+    const testToken = await MockToken.deploy();
 
     return {
       factory,
+      launchPoolImpl,
       rewardToken,
       testToken,
       owner,
       projectOwner,
       user,
-      proxyAddress,
     };
   }
 
-  describe("Initialization", function () {
-    it("Should set the right owner", async function () {
-      const { factory, owner } = await loadFixture(deployFixture);
-      expect(await factory.owner()).to.equal(owner.address);
-    });
-
-    it("Should initialize with version 1", async function () {
-      const { factory } = await loadFixture(deployFixture);
-      expect(await factory.CURRENT_VERSION()).to.equal(1);
-    });
-  });
-
-  describe("Project and Pool Creation", function () {
-    it("Should create new project with initial pool", async function () {
-      const { factory, rewardToken, testToken, owner, projectOwner } =
-        await loadFixture(deployFixture);
-
-      const now = await time.latest();
-      const startTime = now + 100;
-      const endTime = startTime + 3600;
-
-      const metadata = {
-        projectName: "Test Project",
-        website: "https://test.com",
-        logo: "https://test.com/logo.png",
-        discord: "https://discord.gg/test",
-        twitter: "https://twitter.com/test",
-        telegram: "https://t.me/test",
-        tokenInfo: "Test Token Info",
-      };
-
-      const initialPool = {
-        stakedToken: testToken,
-        poolRewardAmount: ethers.parseEther("360"),
-        poolLimitPerUser: ethers.parseEther("100"),
-        minStakeAmount: ethers.parseEther("10"),
-      };
-
-      await expect(
-        factory.createProject(
-          rewardToken,
-          ethers.parseEther("360"),
-          startTime,
-          endTime,
-          metadata,
-          initialPool,
-          projectOwner.address
-        )
-      )
-        .to.emit(factory, "NewProject")
-        .to.emit(factory, "NewLaunchPool")
-        .to.emit(factory, "ProjectStatusUpdated")
-        .withArgs(0, 0); // STAGING status
-
-      const projectId = (await factory.nextProjectId()) - 1n;
-      const poolInfos = await factory.getProjectPools(projectId);
-      expect(poolInfos.length).to.equal(1);
-      expect(poolInfos[0].stakedToken).to.equal(await testToken.getAddress());
-      expect(poolInfos[0].rewardToken).to.equal(await rewardToken.getAddress());
-      expect(poolInfos[0].poolLimitPerUser).to.equal(ethers.parseEther("100"));
-      expect(poolInfos[0].minStakeAmount).to.equal(ethers.parseEther("10"));
-      expect(await factory.getProjectStatus(projectId)).to.equal("STAGING");
-      expect(await factory.getProjectOwner(projectId)).to.equal(
-        projectOwner.address
-      );
-    });
-  });
-
-  describe("Upgrade", function () {
-    it("Should allow owner to upgrade", async function () {
-      const { factory, proxyAddress } = await loadFixture(deployFixture);
-      const Factory = await ethers.getContractFactory(
-        "LaunchPoolFactoryUpgradeable"
-      );
-      const upgraded = await upgrades.upgradeProxy(proxyAddress, Factory);
-      expect(await upgraded.getAddress()).to.equal(proxyAddress);
-    });
-
-    it("Should prevent non-owner from upgrading", async function () {
-      const { user, proxyAddress } = await loadFixture(deployFixture);
-      const Factory = await ethers.getContractFactory(
-        "LaunchPoolFactoryUpgradeable",
-        user
-      );
-      await expect(
-        upgrades.upgradeProxy(proxyAddress, Factory)
-      ).to.be.revertedWith("Ownable: caller is not the owner");
-    });
-
-    it("Should successfully upgrade to V2, maintain old state, and support V2 pools", async function () {
-      const { factory, rewardToken, testToken, owner, proxyAddress } =
-        await loadFixture(deployFixture);
-
-      // Create a project before upgrade
-      const block = await ethers.provider.getBlock("latest");
-      if (!block) throw new Error("Failed to get latest block");
-      const currentTime = block.timestamp;
-      const startTime = currentTime + 3600;
-      const endTime = startTime + 86400;
-
-      await factory.createProject(
-        rewardToken,
-        ethers.parseEther("1000"),
-        startTime,
-        endTime,
-        {
-          projectName: "Test Project",
-          website: "https://test.com",
-          logo: "logo.png",
-          discord: "discord.gg/test",
-          twitter: "twitter.com/test",
-          telegram: "t.me/test",
-          tokenInfo: "Test token info",
-        },
-        {
-          stakedToken: testToken,
-          poolRewardAmount: ethers.parseEther("100"),
-          poolLimitPerUser: ethers.parseEther("10"),
-          minStakeAmount: ethers.parseEther("1"),
-        },
-        owner.address
+  describe("V1 to V2 Upgrade", function () {
+    it("Should upgrade to V2 and initialize correctly", async function () {
+      const { factory, owner, projectOwner } = await loadFixture(
+        deployV1Fixture
       );
 
-      const projectIdBefore = await factory.nextProjectId();
+      // Deploy LaunchPoolV2 implementation
+      const LaunchPoolV2 = await ethers.getContractFactory("LaunchPoolV2");
+      const launchPoolV2Impl = await LaunchPoolV2.deploy();
+      await launchPoolV2Impl.waitForDeployment();
 
-      // Deploy V2 implementation
+      // Upgrade to V2
       const FactoryV2 = await ethers.getContractFactory("LaunchPoolFactoryV2");
-      const upgradedFactory = (await upgrades.upgradeProxy(
-        proxyAddress,
+      const factoryV2 = (await upgrades.upgradeProxy(
+        await factory.getAddress(),
         FactoryV2
       )) as LaunchPoolFactoryV2;
-      await upgradedFactory.waitForDeployment();
 
-      // Call initialize after upgrade to trigger V2 initialization
-      await upgradedFactory.initialize();
+      // Initialize V2
+      await factoryV2.initialize(await launchPoolV2Impl.getAddress());
 
-      // Verify proxy address remains the same
-      expect(await upgradedFactory.getAddress()).to.equal(proxyAddress);
-
-      // Verify old state is preserved
-      expect(await upgradedFactory.nextProjectId()).to.equal(projectIdBefore);
-      expect(await upgradedFactory.owner()).to.equal(owner.address);
-
-      // Test V2 functionality - project limits
-      await upgradedFactory.setMaxProjectsPerOwner(2);
-      expect(await upgradedFactory.maxProjectsPerOwner()).to.equal(2);
-
-      // Enable V2 pools
-      await upgradedFactory.setUseV2Pools(true);
-      expect(await upgradedFactory.useV2Pools()).to.be.true;
-
-      // Create another project with V2 pool (should succeed as under limit)
-      await upgradedFactory.createProject(
-        rewardToken,
-        ethers.parseEther("1000"),
-        startTime,
-        endTime,
-        {
-          projectName: "Test Project 2",
-          website: "https://test2.com",
-          logo: "logo2.png",
-          discord: "discord.gg/test2",
-          twitter: "twitter.com/test2",
-          telegram: "t.me/test2",
-          tokenInfo: "Test token info 2",
-        },
-        {
-          stakedToken: testToken,
-          poolRewardAmount: ethers.parseEther("100"),
-          poolLimitPerUser: ethers.parseEther("10"),
-          minStakeAmount: ethers.parseEther("1"),
-        },
-        owner.address
+      // Verify V2 state
+      expect(await factoryV2.maxProjectsPerOwner()).to.equal(2);
+      expect(await factoryV2.useV2Pools()).to.equal(false);
+      expect(await factoryV2.launchPoolV2Implementation()).to.equal(
+        await launchPoolV2Impl.getAddress()
       );
+    });
 
-      // Get the pool address and verify it's a V2 pool
-      const projectId = (await upgradedFactory.nextProjectId()) - 1n;
-      const poolInfos = await upgradedFactory.getProjectPools(projectId);
+    it("Should enforce project limit in V2", async function () {
+      const { factory, rewardToken, testToken, owner, projectOwner } =
+        await loadFixture(deployV1Fixture);
+
+      // Deploy LaunchPoolV2 implementation
       const LaunchPoolV2 = await ethers.getContractFactory("LaunchPoolV2");
-      const v2Pool = LaunchPoolV2.attach(
-        poolInfos[0].poolAddress
-      ) as Contract & {
-        getParticipationStats(): Promise<[bigint, bigint]>;
+      const launchPoolV2Impl = await LaunchPoolV2.deploy();
+
+      // Upgrade to V2
+      const FactoryV2 = await ethers.getContractFactory("LaunchPoolFactoryV2");
+      const factoryV2 = (await upgrades.upgradeProxy(
+        await factory.getAddress(),
+        FactoryV2
+      )) as LaunchPoolFactoryV2;
+      await factoryV2.initialize(await launchPoolV2Impl.getAddress());
+
+      // Create first project
+      const now = await time.latest();
+      const metadata = {
+        projectName: "Test",
+        website: "test.com",
+        logo: "test.com/logo.png",
+        discord: "discord.gg/test",
+        twitter: "twitter.com/test",
+        telegram: "t.me/test",
+        tokenInfo: "Test Token",
+      };
+      const emptyPool = {
+        stakedTokens: [],
+        poolRewardAmounts: [],
+        poolLimitPerUsers: [],
+        minStakeAmounts: [],
       };
 
-      // Verify V2 specific features
-      const [current, maximum] = await v2Pool.getParticipationStats();
-      expect(current).to.equal(0);
-      expect(maximum).to.equal(100); // Default max participants
+      // Should allow creating up to maxProjectsPerOwner projects
+      await factoryV2.createProject(
+        rewardToken,
+        1000n,
+        now + 100,
+        now + 3600,
+        metadata,
+        emptyPool,
+        projectOwner.address
+      );
 
-      // Try to create one more project (should fail as reached limit)
+      await factoryV2.createProject(
+        rewardToken,
+        1000n,
+        now + 100,
+        now + 3600,
+        metadata,
+        emptyPool,
+        projectOwner.address
+      );
+
+      // Third project should fail
       await expect(
-        upgradedFactory.createProject(
+        factoryV2.createProject(
           rewardToken,
-          ethers.parseEther("1000"),
-          startTime,
-          endTime,
-          {
-            projectName: "Test Project 3",
-            website: "https://test3.com",
-            logo: "logo3.png",
-            discord: "discord.gg/test3",
-            twitter: "twitter.com/test3",
-            telegram: "t.me/test3",
-            tokenInfo: "Test token info 3",
-          },
-          {
-            stakedToken: testToken,
-            poolRewardAmount: ethers.parseEther("100"),
-            poolLimitPerUser: ethers.parseEther("10"),
-            minStakeAmount: ethers.parseEther("1"),
-          },
-          owner.address
+          1000n,
+          now + 100,
+          now + 3600,
+          metadata,
+          emptyPool,
+          projectOwner.address
         )
       ).to.be.revertedWith("Too many projects");
     });
   });
 
-  describe("Pool Version Management", function () {
-    async function createPoolFixture() {
-      const { factory, rewardToken, testToken, owner } = await loadFixture(
-        deployFixture
-      );
+  describe("V2 to V3 Upgrade", function () {
+    async function deployV2Fixture() {
+      const { factory, rewardToken, testToken, owner, projectOwner, user } =
+        await loadFixture(deployV1Fixture);
 
-      const block = await ethers.provider.getBlock("latest");
-      if (!block) throw new Error("Failed to get latest block");
-      const startTime = block.timestamp + 3600;
-      const endTime = startTime + 86400;
+      // Deploy LaunchPoolV2 implementation
+      const LaunchPoolV2 = await ethers.getContractFactory("LaunchPoolV2");
+      const launchPoolV2Impl = await LaunchPoolV2.deploy();
 
-      const tx = await factory.createProject(
-        rewardToken,
-        ethers.parseEther("1000"),
-        startTime,
-        endTime,
-        {
-          projectName: "Test Project",
-          website: "https://test.com",
-          logo: "logo.png",
-          discord: "discord.gg/test",
-          twitter: "twitter.com/test",
-          telegram: "t.me/test",
-          tokenInfo: "Test token info",
-        },
-        {
-          stakedToken: testToken,
-          poolRewardAmount: ethers.parseEther("100"),
-          poolLimitPerUser: ethers.parseEther("10"),
-          minStakeAmount: ethers.parseEther("1"),
-        },
-        owner.address
-      );
+      // Upgrade to V2
+      const FactoryV2 = await ethers.getContractFactory("LaunchPoolFactoryV2");
+      const factoryV2 = (await upgrades.upgradeProxy(
+        await factory.getAddress(),
+        FactoryV2
+      )) as LaunchPoolFactoryV2;
+      await factoryV2.initialize(await launchPoolV2Impl.getAddress());
 
-      const receipt = await tx.wait();
-      if (!receipt) throw new Error("No receipt");
-
-      const event = receipt.logs.find((log: any) => {
-        const decoded = factory.interface.parseLog(log);
-        return decoded?.name === "NewLaunchPool";
-      });
-
-      if (!event) throw new Error("Event not found");
-      const decoded = factory.interface.parseLog(event);
-      if (!decoded) throw new Error("Failed to decode event");
-      const poolAddress = decoded.args[1];
-
-      return { factory, poolAddress };
-    }
-
-    it("Should track pool version", async function () {
-      const { factory, poolAddress } = await loadFixture(createPoolFixture);
-      expect(await factory.getPoolVersion(poolAddress)).to.equal(1);
-    });
-
-    it("Should verify pool is from factory", async function () {
-      const { factory, poolAddress } = await loadFixture(createPoolFixture);
-      expect(await factory.isPoolFromFactory(poolAddress)).to.be.true;
-    });
-
-    it("Should reject non-existent pool version query", async function () {
-      const { factory } = await loadFixture(createPoolFixture);
-      await expect(
-        factory.getPoolVersion(ethers.ZeroAddress)
-      ).to.be.revertedWith("Pool not found");
-    });
-  });
-
-  describe("State Preservation", function () {
-    it("Should preserve state after upgrade", async function () {
-      const { factory, rewardToken, testToken, owner, proxyAddress } =
-        await loadFixture(deployFixture);
-
-      // Create a project before upgrade
-      const block = await ethers.provider.getBlock("latest");
-      if (!block) throw new Error("Failed to get latest block");
-      const startTime = block.timestamp + 3600;
-      const endTime = startTime + 86400;
-
-      await factory.createProject(
-        rewardToken,
-        ethers.parseEther("1000"),
-        startTime,
-        endTime,
-        {
-          projectName: "Test Project",
-          website: "https://test.com",
-          logo: "logo.png",
-          discord: "discord.gg/test",
-          twitter: "twitter.com/test",
-          telegram: "t.me/test",
-          tokenInfo: "Test token info",
-        },
-        {
-          stakedToken: testToken,
-          poolRewardAmount: ethers.parseEther("100"),
-          poolLimitPerUser: ethers.parseEther("10"),
-          minStakeAmount: ethers.parseEther("1"),
-        },
-        owner.address
-      );
-
-      const projectIdBefore = await factory.nextProjectId();
-
-      // Upgrade contract
-      const Factory = await ethers.getContractFactory(
-        "LaunchPoolFactoryUpgradeable"
-      );
-      const upgraded = await upgrades.upgradeProxy(proxyAddress, Factory);
-
-      // Verify state is preserved
-      expect(await upgraded.nextProjectId()).to.equal(projectIdBefore);
-      expect(await upgraded.owner()).to.equal(owner.address);
-    });
-  });
-
-  describe("Multiple Upgrades", function () {
-    it("Should maintain LaunchPool ownership after upgrade", async function () {
-      const {
-        factory,
+      return {
+        factoryV2,
+        launchPoolV2Impl,
         rewardToken,
         testToken,
         owner,
         projectOwner,
         user,
-        proxyAddress,
-      } = await loadFixture(deployFixture);
-
-      // Create project with pool in V1
-      const now = await time.latest();
-      const startTime = now + 100;
-      const endTime = startTime + 3600;
-
-      const metadata = {
-        projectName: "Test Project",
-        website: "https://test.com",
-        logo: "logo.png",
-        discord: "discord.gg/test",
-        twitter: "twitter.com/test",
-        telegram: "t.me/test",
-        tokenInfo: "Test token info",
       };
+    }
 
-      const initialPool = {
-        stakedToken: testToken,
-        poolRewardAmount: ethers.parseEther("100"),
-        poolLimitPerUser: ethers.parseEther("10"),
-        minStakeAmount: ethers.parseEther("1"),
-      };
+    it("Should upgrade to V3 and initialize correctly", async function () {
+      const { factoryV2, owner } = await loadFixture(deployV2Fixture);
 
-      const totalReward = ethers.parseEther("100");
-      await factory.createProject(
-        rewardToken,
-        totalReward,
-        startTime,
-        endTime,
-        metadata,
-        {
-          ...initialPool,
-          poolRewardAmount: totalReward, // Make pool reward match total reward
-        },
-        projectOwner.address
-      );
-
-      const projectId = (await factory.nextProjectId()) - 1n;
-      const poolInfos = await factory.getProjectPools(projectId);
-      const LaunchPool = await ethers.getContractFactory("LaunchPool");
-      const launchPool = LaunchPool.attach(
-        poolInfos[0].poolAddress
-      ) as LaunchPool;
-
-      // Upgrade to V2
-      const FactoryV2 = await ethers.getContractFactory("LaunchPoolFactoryV2");
-      const upgradedFactory = (await upgrades.upgradeProxy(
-        proxyAddress,
-        FactoryV2
-      )) as LaunchPoolFactoryV2;
-      await upgradedFactory.waitForDeployment();
-      await upgradedFactory.initialize();
-
-      // Fund the pool first
-      await rewardToken.mint(projectOwner.address, totalReward);
-      await rewardToken
-        .connect(projectOwner)
-        .approve(await upgradedFactory.getAddress(), ethers.parseEther("100"));
-      await upgradedFactory
-        .connect(projectOwner)
-        .fundPool(
-          projectId,
-          poolInfos[0].poolAddress,
-          ethers.parseEther("100")
-        );
-
-      // Transfer project ownership after funding
-      await upgradedFactory
-        .connect(projectOwner)
-        .transferProjectOwnership(projectId, user.address);
-
-      // Status should be READY after funding
-      expect(await upgradedFactory.getProjectStatus(projectId)).to.equal(
-        "READY"
-      );
-
-      // Test actions in READY state
-      await expect(
-        launchPool.connect(user).updateMinStakeAmount(ethers.parseEther("2"))
-      ).to.not.be.reverted;
-
-      await expect(
-        launchPool
-          .connect(user)
-          .updatePoolLimitPerUser(true, ethers.parseEther("20"))
-      ).to.not.be.reverted;
-
-      // Test actions in ACTIVE state (status changes to ACTIVE after startTime)
-      await time.increaseTo(startTime);
-      expect(await upgradedFactory.getProjectStatus(projectId)).to.equal(
-        "ACTIVE"
-      );
-      await expect(launchPool.connect(user).stopReward()).to.not.be.reverted;
-
-      // Test actions in PAUSED state
-      await upgradedFactory.connect(user).updateProjectStatus(projectId, 3); // ACTIVE -> PAUSED
-
-      await expect(
-        launchPool
-          .connect(user)
-          .emergencyRewardWithdraw(ethers.parseEther("100"))
-      ).to.not.be.reverted;
-
-      // Verify old owner cannot perform admin actions
-      await expect(
-        launchPool
-          .connect(projectOwner)
-          .updateMinStakeAmount(ethers.parseEther("2"))
-      ).to.be.revertedWith("Not project owner");
-
-      await expect(
-        launchPool
-          .connect(projectOwner)
-          .updatePoolLimitPerUser(true, ethers.parseEther("20"))
-      ).to.be.revertedWith("Not project owner");
-
-      await expect(
-        launchPool.connect(projectOwner).stopReward()
-      ).to.be.revertedWith("Not project owner");
-
-      await expect(
-        launchPool
-          .connect(projectOwner)
-          .emergencyRewardWithdraw(ethers.parseEther("100"))
-      ).to.be.revertedWith("Not project owner");
-    });
-
-    it("Should successfully upgrade from V2 to V3", async function () {
-      const { factory, rewardToken, testToken, owner, proxyAddress } =
-        await loadFixture(deployFixture);
-
-      // First upgrade to V2
-      const FactoryV2 = await ethers.getContractFactory("LaunchPoolFactoryV2");
-      const upgradedToV2 = (await upgrades.upgradeProxy(
-        proxyAddress,
-        FactoryV2
-      )) as LaunchPoolFactoryV2;
-      await upgradedToV2.waitForDeployment();
-      await upgradedToV2.initialize();
-
-      // Set V2 specific parameter
-      await upgradedToV2.setMaxProjectsPerOwner(2);
-
-      // Then upgrade to V3
+      // Upgrade to V3
       const FactoryV3 = await ethers.getContractFactory("LaunchPoolFactoryV3");
-      const upgradedToV3 = (await upgrades.upgradeProxy(
-        proxyAddress,
+      const factoryV3 = (await upgrades.upgradeProxy(
+        await factoryV2.getAddress(),
         FactoryV3
       )) as LaunchPoolFactoryV3;
-      await upgradedToV3.waitForDeployment();
-      await upgradedToV3.initialize();
 
-      // Verify V2 state is preserved
-      expect(await upgradedToV3.maxProjectsPerOwner()).to.equal(2);
+      // Initialize V3
+      await factoryV3.initializeV3();
 
-      // Test V3 functionality
+      // Verify V3 state
+      expect(await factoryV3.minProjectInterval()).to.equal(24 * 60 * 60); // 1 day
+    });
+
+    it("Should enforce project interval in V3", async function () {
+      const { factoryV2, rewardToken, owner, projectOwner } = await loadFixture(
+        deployV2Fixture
+      );
+
+      // Upgrade to V3
+      const FactoryV3 = await ethers.getContractFactory("LaunchPoolFactoryV3");
+      const factoryV3 = (await upgrades.upgradeProxy(
+        await factoryV2.getAddress(),
+        FactoryV3
+      )) as LaunchPoolFactoryV3;
+      await factoryV3.initializeV3();
+
       const now = await time.latest();
-      const startTime = now + 100;
-      const endTime = startTime + 3600;
-
       const metadata = {
-        projectName: "Test Project",
-        website: "https://test.com",
-        logo: "logo.png",
+        projectName: "Test",
+        website: "test.com",
+        logo: "test.com/logo.png",
         discord: "discord.gg/test",
         twitter: "twitter.com/test",
         telegram: "t.me/test",
-        tokenInfo: "Test token info",
+        tokenInfo: "Test Token",
       };
-
-      const initialPool = {
-        stakedToken: testToken,
-        poolRewardAmount: ethers.parseEther("100"),
-        poolLimitPerUser: ethers.parseEther("10"),
-        minStakeAmount: ethers.parseEther("1"),
+      const emptyPool = {
+        stakedTokens: [],
+        poolRewardAmounts: [],
+        poolLimitPerUsers: [],
+        minStakeAmounts: [],
       };
 
       // Create first project
-      await upgradedToV3.createProject(
+      await factoryV3.createProject(
         rewardToken,
-        ethers.parseEther("1000"),
-        startTime,
-        endTime,
+        1000n,
+        now + 100,
+        now + 3600,
         metadata,
-        initialPool,
-        owner.address
+        emptyPool,
+        projectOwner.address
       );
 
-      // Try to create second project with start time too soon
+      // Second project with start time less than minProjectInterval should fail
       await expect(
-        upgradedToV3.createProject(
+        factoryV3.createProject(
           rewardToken,
-          ethers.parseEther("1000"),
-          startTime,
-          endTime,
+          1000n,
+          now + 100,
+          now + 3600,
           metadata,
-          initialPool,
-          owner.address
+          emptyPool,
+          projectOwner.address
         )
       ).to.be.revertedWith("Must wait before creating new project");
 
-      // Update min project interval
-      await upgradedToV3.setMinProjectInterval(60); // 1 minute
-
-      // Create second project with longer interval
-      await upgradedToV3.createProject(
+      // Second project with start time after minProjectInterval should succeed
+      await factoryV3.createProject(
         rewardToken,
-        ethers.parseEther("1000"),
-        startTime + 3600, // 1 hour later
-        endTime + 3600,
+        1000n,
+        now + 24 * 60 * 60 + 100, // After minProjectInterval
+        now + 24 * 60 * 60 + 3600,
         metadata,
-        initialPool,
-        owner.address
+        emptyPool,
+        projectOwner.address
       );
     });
   });

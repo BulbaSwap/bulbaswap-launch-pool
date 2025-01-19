@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "@openzeppelin/contracts/proxy/Clones.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./LaunchPool.sol";
 import "./libraries/ProjectLib.sol";
@@ -53,6 +54,9 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
     // Storage variables
     mapping(uint256 => ProjectToken) public projects;
     uint256 public nextProjectId;
+    
+    // LaunchPool implementation address
+    address public launchPoolImplementation;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -65,8 +69,10 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         nextProjectId = 0;
     }
 
-    function initialize() external virtual initializer {
+    function initialize(address _launchPoolImplementation) external virtual initializer {
         _init();
+        require(_launchPoolImplementation != address(0), "Invalid implementation");
+        launchPoolImplementation = _launchPoolImplementation;
     }
 
     // Required authorization check for UUPS
@@ -91,19 +97,37 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         uint256 _poolLimitPerUser,
         uint256 _minStakeAmount
     ) internal virtual returns (address) {
-        address poolAddress = projects.deployPool(
-            _projectId,
+        ProjectToken storage project = projects[_projectId];
+        
+        // Special handling for ETH pools
+        if (address(_stakedToken) != 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE) {
+            require(address(_stakedToken) != address(project.rewardToken), "Tokens must be different");
+        }
+
+        bytes32 salt = keccak256(
+            abi.encodePacked(_projectId, _stakedToken, project.rewardToken, project.startTime)
+        );
+        
+        require(launchPoolImplementation != address(0), "Implementation not set");
+        
+        // Deploy pool using minimal proxy
+        address payable launchPoolAddress = payable(Clones.cloneDeterministic(launchPoolImplementation, salt));
+
+        // Initialize pool
+        LaunchPool(launchPoolAddress).initialize(
             _stakedToken,
             _poolRewardAmount,
             _poolLimitPerUser,
             _minStakeAmount,
-            CURRENT_VERSION
+            _projectId
         );
-        
+
         // Record pool version
-        poolVersions.recordPoolVersion(poolAddress, CURRENT_VERSION);
-        
-        return poolAddress;
+        poolVersions.recordPoolVersion(launchPoolAddress, CURRENT_VERSION);
+
+        project.pools.push(launchPoolAddress);
+        emit Events.NewLaunchPool(_projectId, launchPoolAddress, CURRENT_VERSION);
+        return launchPoolAddress;
     }
 
     function getProjectRewardToken(uint256 _projectId) external view returns (IERC20) {
@@ -149,6 +173,33 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
                block.timestamp < project.endTime;
     }
 
+    struct InitialPoolParams {
+        IERC20[] stakedTokens;
+        uint256[] poolRewardAmounts;
+        uint256[] poolLimitPerUsers;
+        uint256[] minStakeAmounts;
+    }
+
+    function _validateInitialPools(
+        InitialPoolParams calldata _initialPool,
+        uint256 _totalRewardAmount
+    ) internal pure {
+        // Check array lengths match
+        require(
+            _initialPool.stakedTokens.length == _initialPool.poolRewardAmounts.length &&
+            _initialPool.stakedTokens.length == _initialPool.poolLimitPerUsers.length &&
+            _initialPool.stakedTokens.length == _initialPool.minStakeAmounts.length,
+            "Array lengths must match"
+        );
+
+        // Calculate total reward amount
+        uint256 totalPoolRewards;
+        for (uint256 i = 0; i < _initialPool.poolRewardAmounts.length; i++) {
+            totalPoolRewards += _initialPool.poolRewardAmounts[i];
+        }
+        require(totalPoolRewards <= _totalRewardAmount, "Pool rewards exceed total");
+    }
+
     function _createProject(
         IERC20 _rewardToken,
         uint256 _totalRewardAmount,
@@ -158,6 +209,11 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         InitialPoolParams calldata _initialPool,
         address _projectOwner
     ) internal virtual returns (uint256) {
+        // Validate initial pools if any
+        if (_initialPool.stakedTokens.length > 0) {
+            _validateInitialPools(_initialPool, _totalRewardAmount);
+        }
+
         uint256 projectId = projects.createProject(
             nextProjectId,
             _rewardToken,
@@ -170,16 +226,14 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         
         nextProjectId++;
 
-        // If initial pool parameters are provided, create initial pool
-        if (address(_initialPool.stakedToken) != address(0)) {
-            require(_initialPool.poolRewardAmount <= _totalRewardAmount, "Pool reward exceeds total");
-            
+        // Create initial pools if provided
+        for (uint256 i = 0; i < _initialPool.stakedTokens.length; i++) {
             address poolAddress = _deployPool(
                 projectId,
-                _initialPool.stakedToken,
-                _initialPool.poolRewardAmount,
-                _initialPool.poolLimitPerUser,
-                _initialPool.minStakeAmount
+                _initialPool.stakedTokens[i],
+                _initialPool.poolRewardAmounts[i],
+                _initialPool.poolLimitPerUsers[i],
+                _initialPool.minStakeAmounts[i]
             );
             
             // Record funding requirement
@@ -207,13 +261,6 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
             _initialPool,
             _projectOwner
         );
-    }
-
-    struct InitialPoolParams {
-        IERC20 stakedToken;
-        uint256 poolRewardAmount;
-        uint256 poolLimitPerUser;
-        uint256 minStakeAmount;
     }
 
     function updateProjectStatus(uint256 _projectId, ProjectStatus _status) external {
@@ -268,13 +315,18 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         return projects.getProjectPools(_projectId);
     }
 
-    function fundPool(uint256 _projectId, address _poolAddress, uint256 _amount) external {
+    /// @dev Prevents renouncing ownership since it would break the factory
+    function renounceOwnership() public virtual override onlyOwner {
+        revert("Cannot renounce ownership");
+    }
+
+    function fundPool(uint256 _projectId, address payable _poolAddress, uint256 _amount) external {
         require(msg.sender == projects[_projectId].owner, "Only project owner");
         projects.fundPool(_projectId, _poolAddress, _amount);
     }
 
     struct PoolInfo {
-        address poolAddress;
+        address payable poolAddress;
         address stakedToken;
         address rewardToken;
         uint256 rewardPerSecond;

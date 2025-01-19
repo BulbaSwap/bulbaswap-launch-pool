@@ -24,9 +24,9 @@ contract LaunchPoolV2 is LaunchPool {
         uint256 _maxParticipants  // New parameter for V2
     ) external virtual {
         require(!isInitialized, "Already initialized");
-        require(msg.sender == LAUNCH_POOL_FACTORY, "Not factory");
         require(_maxParticipants > 0, "Invalid max participants");  // V2 validation
-
+        
+        factory = LaunchPoolFactoryUpgradeable(msg.sender);
         isInitialized = true;
         projectId = _projectId;
         stakedToken = _stakedToken;
@@ -55,7 +55,7 @@ contract LaunchPoolV2 is LaunchPool {
     }
 
     // Override deposit to track participants
-    function deposit(uint256 _amount) external override nonReentrant {
+    function deposit(uint256 _amount) external virtual override payable nonReentrant {
         require(participantCount < maxParticipants, "Max participants reached");
         
         UserInfo storage user = userInfo[msg.sender];
@@ -80,7 +80,11 @@ contract LaunchPoolV2 is LaunchPool {
 
         if (_amount > 0) {
             user.amount = user.amount + _amount;
-            stakedToken.safeTransferFrom(msg.sender, address(this), _amount);
+            if (address(stakedToken) == ETH) {
+                require(msg.value == _amount, "Invalid ETH amount");
+            } else {
+                stakedToken.safeTransferFrom(msg.sender, address(this), _amount);
+            }
 
             // Track new participant
             if (!hasParticipated[msg.sender]) {

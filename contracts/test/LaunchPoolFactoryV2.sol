@@ -13,6 +13,7 @@ contract LaunchPoolFactoryV2 is LaunchPoolFactoryUpgradeable {
     uint256 public maxProjectsPerOwner;
     mapping(address => uint256) public ownerProjectCount;
     bool public useV2Pools; // Flag to determine which version of pools to create
+    address public launchPoolV2Implementation; // V2 implementation address
 
     // Override internal initialization
     function _init() internal virtual override {
@@ -22,7 +23,10 @@ contract LaunchPoolFactoryV2 is LaunchPoolFactoryUpgradeable {
     }
 
     // Initialize V2
-    function initialize() external virtual override reinitializer(2) {
+    function initialize(address _launchPoolV2Implementation) external virtual override reinitializer(2) {
+        require(_launchPoolV2Implementation != address(0), "Invalid V2 implementation");
+        launchPoolV2Implementation = _launchPoolV2Implementation;
+        maxProjectsPerOwner = 2; // Set default limit
         // Initialize project counts for existing projects
         uint256 projectCount = nextProjectId;
         for (uint256 i = 0; i < projectCount; i++) {
@@ -74,6 +78,11 @@ contract LaunchPoolFactoryV2 is LaunchPoolFactoryUpgradeable {
         useV2Pools = _useV2;
     }
 
+    /// @dev Prevents renouncing ownership since it would break the factory
+    function renounceOwnership() public virtual override onlyOwner {
+        revert("Cannot renounce ownership");
+    }
+
     function _deployPool(
         uint256 _projectId,
         IERC20 _stakedToken,
@@ -82,19 +91,18 @@ contract LaunchPoolFactoryV2 is LaunchPoolFactoryUpgradeable {
         uint256 _minStakeAmount
     ) internal virtual override returns (address) {
         ProjectToken storage project = projects[_projectId];
-        require(address(_stakedToken) != address(project.rewardToken), "Tokens must be different");
-
+        
         bytes32 salt = keccak256(
             abi.encodePacked(_projectId, _stakedToken, project.rewardToken, project.startTime)
         );
         
-        address launchPoolAddress;
+        address implementation = useV2Pools ? launchPoolV2Implementation : launchPoolImplementation;
+        require(implementation != address(0), "Implementation not set");
         
-        if (useV2Pools) {
-            // Deploy V2 pool
-            LaunchPoolV2 launchPool = new LaunchPoolV2{salt: salt}();
-            launchPoolAddress = address(launchPool);
+        // Deploy pool using minimal proxy
+        address payable launchPoolAddress = payable(Clones.cloneDeterministic(implementation, salt));
 
+        if (useV2Pools) {
             // Initialize V2 pool with default max participants
             LaunchPoolV2(launchPoolAddress).initialize(
                 _stakedToken,
@@ -105,10 +113,6 @@ contract LaunchPoolFactoryV2 is LaunchPoolFactoryUpgradeable {
                 100 // Default max participants for V2
             );
         } else {
-            // Deploy V1 pool
-            LaunchPool launchPool = new LaunchPool{salt: salt}();
-            launchPoolAddress = address(launchPool);
-
             // Initialize V1 pool
             LaunchPool(launchPoolAddress).initialize(
                 _stakedToken,

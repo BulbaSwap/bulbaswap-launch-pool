@@ -14,7 +14,7 @@ contract LaunchPoolFactoryV3 is LaunchPoolFactoryV2 {
     }
 
     // Initialize V3
-    function initialize() external override reinitializer(3) {
+    function initializeV3() external reinitializer(3) {
         minProjectInterval = 1 days;
     }
 
@@ -50,5 +50,10 @@ contract LaunchPoolFactoryV3 is LaunchPoolFactoryV2 {
     // New function to set minimum project interval
     function setMinProjectInterval(uint256 _interval) external onlyOwner {
         minProjectInterval = _interval;
+    }
+
+    /// @dev Prevents renouncing ownership since it would break the factory
+    function renounceOwnership() public virtual override onlyOwner {
+        revert("Cannot renounce ownership");
     }
 }

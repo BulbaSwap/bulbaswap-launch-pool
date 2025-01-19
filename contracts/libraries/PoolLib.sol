@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/proxy/Clones.sol";
 import "../LaunchPool.sol";
 import "../LaunchPoolFactoryUpgradeable.sol";
 import "./Events.sol";
@@ -10,44 +11,11 @@ import "./Events.sol";
 library PoolLib {
     using SafeERC20 for IERC20;
 
-    function deployPool(
-        mapping(uint256 => LaunchPoolFactoryUpgradeable.ProjectToken) storage projects,
-        uint256 _projectId,
-        IERC20 _stakedToken,
-        uint256 _poolRewardAmount,
-        uint256 _poolLimitPerUser,
-        uint256 _minStakeAmount,
-        uint256 currentVersion
-    ) internal returns (address) {
-        LaunchPoolFactoryUpgradeable.ProjectToken storage project = projects[_projectId];
-        require(address(_stakedToken) != address(project.rewardToken), "Tokens must be different");
-
-        bytes32 salt = keccak256(
-            abi.encodePacked(_projectId, _stakedToken, project.rewardToken, project.startTime)
-        );
-        
-        // Deploy pool
-        LaunchPool launchPool = new LaunchPool{salt: salt}();
-        address launchPoolAddress = address(launchPool);
-
-        // Initialize pool
-        LaunchPool(launchPoolAddress).initialize(
-            _stakedToken,
-            _poolRewardAmount,
-            _poolLimitPerUser,
-            _minStakeAmount,
-            _projectId
-        );
-
-        project.pools.push(launchPoolAddress);
-        emit Events.NewLaunchPool(_projectId, launchPoolAddress, currentVersion);
-        return launchPoolAddress;
-    }
 
     function fundPool(
         mapping(uint256 => LaunchPoolFactoryUpgradeable.ProjectToken) storage projects,
         uint256 _projectId,
-        address _poolAddress,
+        address payable _poolAddress,
         uint256 _amount
     ) internal {
         LaunchPoolFactoryUpgradeable.ProjectToken storage project = projects[_projectId];
@@ -69,7 +37,7 @@ library PoolLib {
         if (project.fundedPoolCount == project.pools.length) {
             uint256 totalAllocated = 0;
             for (uint256 i = 0; i < project.pools.length; i++) {
-                LaunchPool currentPool = LaunchPool(project.pools[i]);
+                LaunchPool currentPool = LaunchPool(payable(project.pools[i]));
                 totalAllocated += currentPool.poolRewardAmount();
             }
             require(totalAllocated == project.totalRewardAmount, "Total allocated rewards must match total");
@@ -94,7 +62,10 @@ library PoolLib {
         uint256 _projectId
     ) internal view returns (LaunchPoolFactoryUpgradeable.PoolInfo[] memory) {
         LaunchPoolFactoryUpgradeable.ProjectToken storage project = projects[_projectId];
-        address[] memory poolAddresses = project.pools;
+        address payable[] memory poolAddresses = new address payable[](project.pools.length);
+        for (uint256 i = 0; i < project.pools.length; i++) {
+            poolAddresses[i] = payable(project.pools[i]);
+        }
         LaunchPoolFactoryUpgradeable.PoolInfo[] memory poolInfos = new LaunchPoolFactoryUpgradeable.PoolInfo[](poolAddresses.length);
         
         for (uint256 i = 0; i < poolAddresses.length; i++) {
@@ -115,6 +86,9 @@ library PoolLib {
     }
 
     // LaunchPool specific functions
+    // ETH address constant
+    address constant internal ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
     function updatePool(
         uint256 accTokenPerShare,
         uint256 lastRewardTime,
@@ -122,7 +96,8 @@ library PoolLib {
         uint256 startTime,
         uint256 endTime,
         uint256 precisionFactor,
-        IERC20 stakedToken
+        IERC20 stakedToken,
+        address payable caller
     ) internal view returns (uint256 newAccTokenPerShare, uint256 newLastRewardTime) {
         newAccTokenPerShare = accTokenPerShare;
         newLastRewardTime = lastRewardTime;
@@ -143,7 +118,13 @@ library PoolLib {
             return (newAccTokenPerShare, newLastRewardTime);
         }
 
-        uint256 stakedTokenSupply = stakedToken.balanceOf(address(this));
+        // Get staked token supply based on token type
+        uint256 stakedTokenSupply;
+        if (address(stakedToken) == ETH) {
+            stakedTokenSupply = LaunchPool(caller).totalStaked();
+        } else {
+            stakedTokenSupply = stakedToken.balanceOf(caller);
+        }
 
         // If no staked tokens, only update last reward time
         if (stakedTokenSupply == 0) {
@@ -162,7 +143,9 @@ library PoolLib {
         // Calculate and update rewards
         uint256 multiplier = getMultiplier(lastRewardTime, endPoint, startTime, endTime);
         uint256 reward = multiplier * rewardPerSecond;
-        newAccTokenPerShare = newAccTokenPerShare + reward * precisionFactor / stakedTokenSupply;
+        if (stakedTokenSupply > 0) {
+            newAccTokenPerShare = newAccTokenPerShare + reward * precisionFactor / stakedTokenSupply;
+        }
         newLastRewardTime = endPoint;
 
         return (newAccTokenPerShare, newLastRewardTime);

@@ -81,7 +81,7 @@ const config: HardhatUserConfig = {
     ],
   },
   sourcify: {
-    enabled: true,
+    enabled: false,
   },
   mocha: {
     timeout: 100000,

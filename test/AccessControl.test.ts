@@ -12,14 +12,23 @@ describe("Access Control", function () {
   async function deployFixture() {
     const [owner, projectOwner, user1] = await ethers.getSigners();
 
+    // Deploy LaunchPool implementation first
+    const LaunchPoolFactory = await ethers.getContractFactory("LaunchPool");
+    const launchPoolImpl = await LaunchPoolFactory.deploy();
+    await launchPoolImpl.waitForDeployment();
+
     // Deploy factory contract with UUPS proxy
     const Factory = await ethers.getContractFactory(
       "LaunchPoolFactoryUpgradeable"
     );
-    const factory = (await upgrades.deployProxy(Factory, [], {
-      initializer: "initialize",
-      kind: "uups",
-    })) as LaunchPoolFactoryUpgradeable;
+    const factory = (await upgrades.deployProxy(
+      Factory,
+      [await launchPoolImpl.getAddress()],
+      {
+        initializer: "initialize",
+        kind: "uups",
+      }
+    )) as LaunchPoolFactoryUpgradeable;
 
     // Deploy tokens
     const MockToken = await ethers.getContractFactory("MockToken");
@@ -46,10 +55,10 @@ describe("Access Control", function () {
     };
 
     const initialPool = {
-      stakedToken: testToken,
-      poolRewardAmount: ethers.parseEther("360"), // 0.1 tokens per second * 3600 seconds
-      poolLimitPerUser: ethers.parseEther("100"),
-      minStakeAmount: ethers.parseEther("10"),
+      stakedTokens: [testToken],
+      poolRewardAmounts: [ethers.parseEther("360")],
+      poolLimitPerUsers: [ethers.parseEther("100")],
+      minStakeAmounts: [ethers.parseEther("10")],
     };
 
     await factory.createProject(
@@ -64,8 +73,8 @@ describe("Access Control", function () {
 
     const projectId = (await factory.nextProjectId()) - 1n;
     const poolInfos = await factory.getProjectPools(projectId);
-    const LaunchPool = await ethers.getContractFactory("LaunchPool");
-    const launchPool = LaunchPool.attach(
+    const LaunchPoolContract = await ethers.getContractFactory("LaunchPool");
+    const launchPool = LaunchPoolContract.attach(
       poolInfos[0].poolAddress
     ) as LaunchPool;
 
@@ -121,10 +130,10 @@ describe("Access Control", function () {
       };
 
       const emptyPool = {
-        stakedToken: ethers.ZeroAddress,
-        poolRewardAmount: 0n,
-        poolLimitPerUser: 0n,
-        minStakeAmount: 0n,
+        stakedTokens: [],
+        poolRewardAmounts: [],
+        poolLimitPerUsers: [],
+        minStakeAmounts: [],
       };
 
       await expect(
@@ -158,10 +167,10 @@ describe("Access Control", function () {
       };
 
       const emptyPool = {
-        stakedToken: ethers.ZeroAddress,
-        poolRewardAmount: 0n,
-        poolLimitPerUser: 0n,
-        minStakeAmount: 0n,
+        stakedTokens: [],
+        poolRewardAmounts: [],
+        poolLimitPerUsers: [],
+        minStakeAmounts: [],
       };
 
       await expect(

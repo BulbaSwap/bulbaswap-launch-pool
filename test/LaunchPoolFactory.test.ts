@@ -12,14 +12,23 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
   async function deployFixture() {
     const [owner, projectOwner, user] = await ethers.getSigners();
 
+    // Deploy LaunchPool implementation first
+    const LaunchPool = await ethers.getContractFactory("LaunchPool");
+    const launchPoolImpl = await LaunchPool.deploy();
+    await launchPoolImpl.waitForDeployment();
+
     // Deploy factory contract with UUPS proxy
     const Factory = await ethers.getContractFactory(
       "LaunchPoolFactoryUpgradeable"
     );
-    const factory = (await upgrades.deployProxy(Factory, [], {
-      initializer: "initialize",
-      kind: "uups",
-    })) as LaunchPoolFactoryUpgradeable;
+    const factory = (await upgrades.deployProxy(
+      Factory,
+      [await launchPoolImpl.getAddress()],
+      {
+        initializer: "initialize",
+        kind: "uups",
+      }
+    )) as LaunchPoolFactoryUpgradeable;
 
     // Deploy token contracts
     const MockToken = await ethers.getContractFactory("MockToken");
@@ -68,10 +77,10 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
       };
 
       const initialPool = {
-        stakedToken: testToken,
-        poolRewardAmount: ethers.parseEther("360"), // 0.1 tokens per second * 3600 seconds
-        poolLimitPerUser: ethers.parseEther("100"),
-        minStakeAmount: ethers.parseEther("10"),
+        stakedTokens: [testToken],
+        poolRewardAmounts: [ethers.parseEther("360")], // 0.1 tokens per second * 3600 seconds
+        poolLimitPerUsers: [ethers.parseEther("100")],
+        minStakeAmounts: [ethers.parseEther("10")],
       };
 
       await expect(
@@ -119,10 +128,10 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
       };
 
       const emptyPool = {
-        stakedToken: ethers.ZeroAddress,
-        poolRewardAmount: 0,
-        poolLimitPerUser: 0,
-        minStakeAmount: 0,
+        stakedTokens: [],
+        poolRewardAmounts: [],
+        poolLimitPerUsers: [],
+        minStakeAmounts: [],
       };
 
       await expect(
@@ -162,10 +171,10 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
       };
 
       const emptyPool = {
-        stakedToken: ethers.ZeroAddress,
-        poolRewardAmount: 0n,
-        poolLimitPerUser: 0n,
-        minStakeAmount: 0n,
+        stakedTokens: [],
+        poolRewardAmounts: [],
+        poolLimitPerUsers: [],
+        minStakeAmounts: [],
       };
 
       await factory.createProject(
@@ -227,10 +236,10 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
       };
 
       const emptyPool = {
-        stakedToken: ethers.ZeroAddress,
-        poolRewardAmount: 0n,
-        poolLimitPerUser: 0n,
-        minStakeAmount: 0n,
+        stakedTokens: [],
+        poolRewardAmounts: [],
+        poolLimitPerUsers: [],
+        minStakeAmounts: [],
       };
 
       await expect(
@@ -264,10 +273,10 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
       };
 
       const initialPool = {
-        stakedToken: rewardToken, // Same as reward token
-        poolRewardAmount: ethers.parseEther("360"),
-        poolLimitPerUser: ethers.parseEther("100"),
-        minStakeAmount: ethers.parseEther("10"),
+        stakedTokens: [rewardToken], // Same as reward token
+        poolRewardAmounts: [ethers.parseEther("360")],
+        poolLimitPerUsers: [ethers.parseEther("100")],
+        minStakeAmounts: [ethers.parseEther("10")],
       };
 
       await expect(
@@ -312,10 +321,10 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
       };
 
       const initialPool = {
-        stakedToken: testToken,
-        poolRewardAmount: ethers.parseEther("360"), // 0.1 tokens per second * 3600 seconds
-        poolLimitPerUser: ethers.parseEther("100"),
-        minStakeAmount: ethers.parseEther("10"),
+        stakedTokens: [testToken],
+        poolRewardAmounts: [ethers.parseEther("360")], // 0.1 tokens per second * 3600 seconds
+        poolLimitPerUsers: [ethers.parseEther("100")],
+        minStakeAmounts: [ethers.parseEther("10")],
       };
 
       await factory.createProject(
@@ -468,10 +477,10 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
       };
 
       const initialPool = {
-        stakedToken: testToken,
-        poolRewardAmount: ethers.parseEther("360"),
-        poolLimitPerUser: ethers.parseEther("100"),
-        minStakeAmount: ethers.parseEther("10"),
+        stakedTokens: [testToken],
+        poolRewardAmounts: [ethers.parseEther("360")],
+        poolLimitPerUsers: [ethers.parseEther("100")],
+        minStakeAmounts: [ethers.parseEther("10")],
       };
 
       await factory.createProject(

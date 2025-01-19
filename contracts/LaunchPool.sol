@@ -18,9 +18,6 @@ contract LaunchPool is ReentrancyGuard {
     bytes32 internal constant DELISTED = keccak256(bytes("DELISTED"));
     bytes32 internal constant READY = keccak256(bytes("READY"));
 
-    // The address of the launch pool factory
-    address public immutable LAUNCH_POOL_FACTORY;
-
     // The ID of the project this pool belongs to
     uint256 public projectId;
 
@@ -31,7 +28,7 @@ contract LaunchPool is ReentrancyGuard {
     bool public isInitialized;
 
     // The factory contract
-    LaunchPoolFactoryUpgradeable public immutable factory;
+    LaunchPoolFactoryUpgradeable public factory;
 
     // Accrued token per share
     uint256 public accTokenPerShare;
@@ -56,6 +53,9 @@ contract LaunchPool is ReentrancyGuard {
 
     // The staked token
     IERC20 public stakedToken;
+
+    // Total staked amount (used for ETH pools)
+    uint256 public totalStaked;
 
     // Info of each user that stakes tokens (stakedToken)
     mapping(address => UserInfo) public userInfo;
@@ -82,10 +82,7 @@ contract LaunchPool is ReentrancyGuard {
         _;
     }
 
-    constructor() {
-        LAUNCH_POOL_FACTORY = msg.sender;
-        factory = LaunchPoolFactoryUpgradeable(msg.sender);
-    }
+    constructor() {}
 
     function initialize(
         IERC20 _stakedToken,
@@ -95,8 +92,8 @@ contract LaunchPool is ReentrancyGuard {
         uint256 _projectId
     ) external virtual {
         require(!isInitialized, "Already initialized");
-        require(msg.sender == LAUNCH_POOL_FACTORY, "Not factory");
-
+        
+        factory = LaunchPoolFactoryUpgradeable(msg.sender);
         isInitialized = true;
         projectId = _projectId;
         stakedToken = _stakedToken;
@@ -133,7 +130,10 @@ contract LaunchPool is ReentrancyGuard {
         return factory.getProjectTimes(projectId);
     }
 
-    function deposit(uint256 _amount) external virtual nonReentrant {
+    // ETH address constant
+    address constant internal ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
+    function deposit(uint256 _amount) external virtual payable nonReentrant {
         UserInfo storage user = userInfo[msg.sender];
 
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
@@ -158,7 +158,12 @@ contract LaunchPool is ReentrancyGuard {
 
         if (_amount > 0) {
             user.amount = user.amount + _amount;
-            stakedToken.safeTransferFrom(msg.sender, address(this), _amount);
+            if (address(stakedToken) == ETH) {
+                require(msg.value == _amount, "Invalid ETH amount");
+                totalStaked += _amount;
+            } else {
+                stakedToken.safeTransferFrom(msg.sender, address(this), _amount);
+            }
         }
 
         user.rewardDebt = user.amount * accTokenPerShare / PRECISION_FACTOR;
@@ -181,7 +186,13 @@ contract LaunchPool is ReentrancyGuard {
 
         if (_amount > 0) {
             user.amount = user.amount - _amount;
-            stakedToken.safeTransfer(msg.sender, _amount);
+            if (address(stakedToken) == ETH) {
+                totalStaked -= _amount;
+                (bool success, ) = msg.sender.call{value: _amount}("");
+                require(success, "ETH transfer failed");
+            } else {
+                stakedToken.safeTransfer(msg.sender, _amount);
+            }
         }
 
         user.rewardDebt = user.amount * accTokenPerShare / PRECISION_FACTOR;
@@ -218,10 +229,21 @@ contract LaunchPool is ReentrancyGuard {
         user.pendingRewards = 0;
 
         if (amountToTransfer > 0) {
-            stakedToken.safeTransfer(msg.sender, amountToTransfer);
+            if (address(stakedToken) == ETH) {
+                totalStaked -= amountToTransfer;
+                (bool success, ) = msg.sender.call{value: amountToTransfer}("");
+                require(success, "ETH transfer failed");
+            } else {
+                stakedToken.safeTransfer(msg.sender, amountToTransfer);
+            }
         }
 
         emit EmergencyWithdraw(msg.sender, amountToTransfer);
+    }
+
+    // Add receive function to accept ETH
+    receive() external payable {
+        require(address(stakedToken) == ETH, "Not ETH pool");
     }
 
     function emergencyRewardWithdraw(uint256 _amount) external onlyProjectOwner {
@@ -279,7 +301,7 @@ contract LaunchPool is ReentrancyGuard {
 
     function pendingReward(address _user) external view returns (uint256) {
         UserInfo storage user = userInfo[_user];
-        uint256 stakedTokenSupply = stakedToken.balanceOf(address(this));
+        uint256 stakedTokenSupply = address(stakedToken) == ETH ? totalStaked : stakedToken.balanceOf(address(this));
         uint256 currentAccTokenPerShare = accTokenPerShare;
         (uint256 startTime, uint256 endTime) = getProjectTimes();
         
@@ -314,7 +336,9 @@ contract LaunchPool is ReentrancyGuard {
         // Calculate new rewards
         uint256 multiplier = PoolLib.getMultiplier(lastRewardTime, endPoint, startTime, endTime);
         uint256 reward = multiplier * rewardPerSecond;
-        currentAccTokenPerShare = currentAccTokenPerShare + reward * PRECISION_FACTOR / stakedTokenSupply;
+        if (stakedTokenSupply > 0) {
+            currentAccTokenPerShare = currentAccTokenPerShare + reward * PRECISION_FACTOR / stakedTokenSupply;
+        }
         
         return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
     }
@@ -329,7 +353,8 @@ contract LaunchPool is ReentrancyGuard {
             startTime,
             endTime,
             PRECISION_FACTOR,
-            stakedToken
+            stakedToken,
+            payable(address(this))
         );
 
         accTokenPerShare = newAccTokenPerShare;
