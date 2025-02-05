@@ -46,21 +46,21 @@ contract LaunchPoolFactoryV2 is LaunchPoolFactoryUpgradeable {
         uint256 _startTime,
         uint256 _endTime,
         PoolMetadata calldata _metadata,
-        InitialPoolParams calldata _initialPool,
+        InitialPoolParams[] calldata _initialPools,
         address _projectOwner
-    ) internal virtual override returns (uint256 projectId) {
+    ) internal virtual override returns (uint256) {
         require(
             ownerProjectCount[_projectOwner] < maxProjectsPerOwner,
             "Too many projects"
         );
         
-        projectId = super._createProject(
+        uint256 projectId = super._createProject(
             _rewardToken,
             _totalRewardAmount,
             _startTime,
             _endTime,
             _metadata,
-            _initialPool,
+            _initialPools,
             _projectOwner
         );
 

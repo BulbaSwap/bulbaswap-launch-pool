@@ -35,10 +35,28 @@ async function main() {
   const [deployer] = await ethers.getSigners();
   console.log("Deploying contracts with account:", deployer.address);
 
+  // Get current gas price
+  const feeData = await ethers.provider.getFeeData();
+  const maxFeePerGas = feeData.maxFeePerGas! * 2n; // 2x maxFeePerGas
+  const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas! * 2n; // 2x maxPriorityFeePerGas
+
   // Deploy LaunchPool implementation
   console.log("\n1️⃣  Deploying LaunchPool implementation...");
+  console.log(
+    `Using maxFeePerGas: ${ethers.formatUnits(maxFeePerGas, "gwei")} gwei`
+  );
+  console.log(
+    `Using maxPriorityFeePerGas: ${ethers.formatUnits(
+      maxPriorityFeePerGas,
+      "gwei"
+    )} gwei`
+  );
+
   const LaunchPool = await ethers.getContractFactory("LaunchPool");
-  const launchPoolImpl = await LaunchPool.deploy();
+  const launchPoolImpl = await LaunchPool.deploy({
+    maxFeePerGas,
+    maxPriorityFeePerGas,
+  });
   await launchPoolImpl.waitForDeployment();
   const launchPoolImplAddress = await launchPoolImpl.getAddress();
   console.log("LaunchPool implementation deployed to:", launchPoolImplAddress);
@@ -60,6 +78,14 @@ async function main() {
     {
       initializer: "initialize",
       kind: "uups",
+      constructorArgs: [],
+      timeout: 0,
+      pollingInterval: 5000,
+      useDeployedImplementation: false,
+      txOverrides: {
+        maxFeePerGas,
+        maxPriorityFeePerGas,
+      },
     }
   );
 

@@ -25,9 +25,9 @@ contract LaunchPoolFactoryV3 is LaunchPoolFactoryV2 {
         uint256 _startTime,
         uint256 _endTime,
         PoolMetadata calldata _metadata,
-        InitialPoolParams calldata _initialPool,
+        InitialPoolParams[] calldata _initialPools,
         address _projectOwner
-    ) internal virtual override returns (uint256 projectId) {
+    ) internal virtual override returns (uint256) {
         // Check if user has created a project recently
         if (ownerProjectCount[_projectOwner] > 0) {
             require(
@@ -42,7 +42,7 @@ contract LaunchPoolFactoryV3 is LaunchPoolFactoryV2 {
             _startTime,
             _endTime,
             _metadata,
-            _initialPool,
+            _initialPools,
             _projectOwner
         );
     }

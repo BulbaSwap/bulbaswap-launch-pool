@@ -54,7 +54,7 @@ library PoolLib {
     ) internal view returns (uint256) {
         LaunchPoolFactoryUpgradeable.ProjectToken storage project = projects[_projectId];
         uint256 duration = project.endTime - project.startTime;
-        return (_poolRewardAmount + duration - 1) / duration; // Ceiling division
+        return _poolRewardAmount / duration;
     }
 
     function getProjectPools(
@@ -96,7 +96,7 @@ library PoolLib {
         uint256 startTime,
         uint256 endTime,
         uint256 precisionFactor,
-        IERC20 stakedToken,
+        IERC20 /* stakedToken */,
         address payable caller
     ) internal view returns (uint256 newAccTokenPerShare, uint256 newLastRewardTime) {
         newAccTokenPerShare = accTokenPerShare;
@@ -119,12 +119,7 @@ library PoolLib {
         }
 
         // Get staked token supply based on token type
-        uint256 stakedTokenSupply;
-        if (address(stakedToken) == ETH) {
-            stakedTokenSupply = LaunchPool(caller).totalStaked();
-        } else {
-            stakedTokenSupply = stakedToken.balanceOf(caller);
-        }
+        uint256 stakedTokenSupply = LaunchPool(caller).totalStaked();
 
         // If no staked tokens, only update last reward time
         if (stakedTokenSupply == 0) {
@@ -144,7 +139,9 @@ library PoolLib {
         uint256 multiplier = getMultiplier(lastRewardTime, endPoint, startTime, endTime);
         uint256 reward = multiplier * rewardPerSecond;
         if (stakedTokenSupply > 0) {
-            newAccTokenPerShare = newAccTokenPerShare + reward * precisionFactor / stakedTokenSupply;
+            uint256 rewardWithPrecision = reward * precisionFactor;
+            uint256 addition = rewardWithPrecision / stakedTokenSupply;
+            newAccTokenPerShare = newAccTokenPerShare + addition;
         }
         newLastRewardTime = endPoint;
 

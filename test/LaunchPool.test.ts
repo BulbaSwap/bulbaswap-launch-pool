@@ -54,12 +54,14 @@ describe("LaunchPool", function () {
       tokenInfo: "Test Token Info",
     };
 
-    const initialPool = {
-      stakedTokens: [testToken],
-      poolRewardAmounts: [ethers.parseEther("360")],
-      poolLimitPerUsers: [ethers.parseEther("100")],
-      minStakeAmounts: [ethers.parseEther("10")],
-    };
+    const initialPools = [
+      {
+        stakedToken: testToken,
+        poolRewardAmount: ethers.parseEther("360"),
+        poolLimitPerUser: ethers.parseEther("100"),
+        minStakeAmount: ethers.parseEther("10"),
+      },
+    ];
 
     await factory.createProject(
       rewardToken,
@@ -67,7 +69,7 @@ describe("LaunchPool", function () {
       startTime,
       endTime,
       metadata,
-      initialPool,
+      initialPools,
       projectOwner.address
     );
 
@@ -173,6 +175,87 @@ describe("LaunchPool", function () {
       );
     });
 
+    it("Should calculate rewards correctly for deposits made in READY state", async function () {
+      // User1 deposits in READY state (before start time)
+      await launchPool.connect(user1).deposit(ethers.parseEther("50"));
+
+      // Verify no rewards before start time
+      expect(await launchPool.pendingReward(user1.address)).to.equal(0);
+
+      // Move to start time
+      await time.increaseTo(startTime);
+
+      // Move 30 minutes into active period
+      await time.increase(1800);
+
+      // Calculate expected rewards:
+      // 30 minutes = 1800 seconds
+      // reward per second = 0.1 tokens (360 tokens / 3600 seconds)
+      // total expected = 1800 * 0.1 = 180 tokens
+      expect(await launchPool.pendingReward(user1.address)).to.be.closeTo(
+        ethers.parseEther("180"),
+        ethers.parseEther("0.1")
+      );
+
+      // User2 deposits at this point
+      await launchPool.connect(user2).deposit(ethers.parseEther("50"));
+
+      // Move another 30 minutes
+      await time.increase(1800);
+
+      // Check User1's rewards:
+      // First 30 min: 180 tokens (full)
+      // Second 30 min: 90 tokens (shared)
+      // Total: 270 tokens
+      expect(await launchPool.pendingReward(user1.address)).to.be.closeTo(
+        ethers.parseEther("270"),
+        ethers.parseEther("0.1")
+      );
+
+      // Check User2's rewards:
+      // Only second 30 min: 90 tokens (shared)
+      expect(await launchPool.pendingReward(user2.address)).to.be.closeTo(
+        ethers.parseEther("90"),
+        ethers.parseEther("0.1")
+      );
+    });
+
+    it("Should allow deposits in READY state without accumulating rewards", async function () {
+      // Project is already in READY state after deployment
+
+      // User1 deposits in READY state
+      await launchPool.connect(user1).deposit(ethers.parseEther("50"));
+
+      // Check no rewards accumulated before start time
+      expect(await launchPool.pendingReward(user1.address)).to.equal(0);
+
+      // Move to start time and verify rewards start accumulating
+      await time.increaseTo(startTime);
+      await time.increase(900); // 15 minutes
+
+      expect(await launchPool.pendingReward(user1.address)).to.be.closeTo(
+        ethers.parseEther("90"),
+        ethers.parseEther("0.1")
+      );
+    });
+
+    it("Should allow withdrawals in READY state", async function () {
+      // User1 deposits in READY state
+      await launchPool.connect(user1).deposit(ethers.parseEther("50"));
+
+      // Withdraw half amount in READY state
+      const beforeBalance = await testToken.balanceOf(user1.address);
+      await launchPool.connect(user1).withdraw(ethers.parseEther("25"));
+
+      // Verify withdrawal amount
+      expect(await testToken.balanceOf(user1.address)).to.equal(
+        beforeBalance + ethers.parseEther("25")
+      );
+
+      // Verify no rewards accumulated in READY state
+      expect(await launchPool.pendingReward(user1.address)).to.equal(0);
+    });
+
     it("Should handle deposits and rewards correctly", async function () {
       // Move to start time
       await time.increaseTo(startTime);
@@ -218,10 +301,13 @@ describe("LaunchPool", function () {
       );
     });
 
-    it("Should handle emergency withdrawal", async function () {
+    it("Should handle emergency withdrawal in PAUSED state", async function () {
       await time.increaseTo(startTime);
       await launchPool.connect(user1).deposit(ethers.parseEther("50"));
       await time.increase(900);
+
+      // Set project status to PAUSED
+      await factory.connect(projectOwner).updateProjectStatus(projectId, 3); // PAUSED
 
       const beforeBalance = await testToken.balanceOf(user1.address);
       await launchPool.connect(user1).emergencyWithdraw();
@@ -259,31 +345,6 @@ describe("LaunchPool", function () {
       expect(await launchPool.poolLimitPerUser()).to.equal(
         ethers.parseEther("200")
       );
-
-      await launchPool
-        .connect(projectOwner)
-        .updateRewardPerSecond(ethers.parseEther("0.2"));
-      expect(await launchPool.rewardPerSecond()).to.equal(
-        ethers.parseEther("0.2")
-      );
-    });
-
-    it("Should not allow admin functions in wrong states", async function () {
-      const [startTime] = await launchPool.getProjectTimes();
-      await time.increaseTo(startTime);
-
-      await expect(
-        launchPool
-          .connect(projectOwner)
-          .updateMinStakeAmount(ethers.parseEther("20"))
-      ).to.be.revertedWith("Pool not in ready state");
-
-      await factory.connect(projectOwner).updateProjectStatus(projectId, 3); // PAUSED
-      await expect(
-        launchPool
-          .connect(projectOwner)
-          .updateMinStakeAmount(ethers.parseEther("20"))
-      ).to.be.revertedWith("Pool not in ready state");
     });
 
     it("Should not allow non-project-owner to call admin functions", async function () {
@@ -295,12 +356,6 @@ describe("LaunchPool", function () {
         launchPool
           .connect(user1)
           .updatePoolLimitPerUser(true, ethers.parseEther("200"))
-      ).to.be.revertedWith("Not project owner");
-
-      await expect(
-        launchPool
-          .connect(user1)
-          .updateRewardPerSecond(ethers.parseEther("0.2"))
       ).to.be.revertedWith("Not project owner");
     });
 
@@ -321,6 +376,181 @@ describe("LaunchPool", function () {
       await expect(
         launchPool.connect(user1).updateMinStakeAmount(ethers.parseEther("20"))
       ).to.not.be.reverted;
+    });
+  });
+
+  describe("Precision Test", function () {
+    let factory: LaunchPoolFactoryUpgradeable;
+    let launchPool: LaunchPool;
+    let rewardToken: MockToken;
+    let testToken: MockToken;
+    let projectId: bigint;
+    let projectOwner: HardhatEthersSigner;
+    let user1: HardhatEthersSigner;
+    let user2: HardhatEthersSigner;
+    let startTime: number;
+    let endTime: number;
+
+    beforeEach(async function () {
+      // Deploy LaunchPool implementation first
+      const LaunchPoolFactory = await ethers.getContractFactory("LaunchPool");
+      const launchPoolImpl = await LaunchPoolFactory.deploy();
+      await launchPoolImpl.waitForDeployment();
+
+      // Deploy factory contract with UUPS proxy
+      const Factory = await ethers.getContractFactory(
+        "LaunchPoolFactoryUpgradeable"
+      );
+      factory = (await upgrades.deployProxy(
+        Factory,
+        [await launchPoolImpl.getAddress()],
+        {
+          initializer: "initialize",
+          kind: "uups",
+        }
+      )) as LaunchPoolFactoryUpgradeable;
+
+      const [owner, _projectOwner, _user1, _user2] = await ethers.getSigners();
+      projectOwner = _projectOwner;
+      user1 = _user1;
+      user2 = _user2;
+
+      // Deploy tokens
+      const MockToken = await ethers.getContractFactory("MockToken");
+      rewardToken = await MockToken.deploy();
+      await rewardToken.waitForDeployment();
+      testToken = await MockToken.deploy();
+      await testToken.waitForDeployment();
+
+      // Set up timestamps for 600 seconds duration
+      const now = await time.latest();
+      startTime = now + 100;
+      endTime = startTime + 600;
+
+      // Create project with 1000 USDT reward
+      const metadata = {
+        projectName: "Precision Test Project",
+        website: "https://test.com",
+        logo: "https://test.com/logo.png",
+        discord: "https://discord.gg/test",
+        twitter: "https://twitter.com/test",
+        telegram: "https://t.me/test",
+        tokenInfo: "Precision Test Pool",
+      };
+
+      const initialPools = [
+        {
+          stakedToken: testToken,
+          poolRewardAmount: ethers.parseEther("1000"),
+          poolLimitPerUser: ethers.parseEther("10"),
+          minStakeAmount: ethers.parseEther("0.1"),
+        },
+      ];
+
+      await factory.createProject(
+        rewardToken,
+        ethers.parseEther("1000"),
+        startTime,
+        endTime,
+        metadata,
+        initialPools,
+        projectOwner.address
+      );
+
+      projectId = (await factory.nextProjectId()) - 1n;
+      const poolInfos = await factory.getProjectPools(projectId);
+      const LaunchPool = await ethers.getContractFactory("LaunchPool");
+      launchPool = LaunchPool.attach(poolInfos[0].poolAddress) as LaunchPool;
+
+      // Fund pool with reward tokens
+      await rewardToken.mint(projectOwner.address, ethers.parseEther("1000"));
+      await rewardToken
+        .connect(projectOwner)
+        .approve(await factory.getAddress(), ethers.parseEther("1000"));
+      await factory
+        .connect(projectOwner)
+        .fundPool(
+          projectId,
+          poolInfos[0].poolAddress,
+          ethers.parseEther("1000")
+        );
+
+      // Mint test tokens to users
+      await testToken.mint(user1.address, ethers.parseEther("1"));
+      await testToken.mint(user2.address, ethers.parseEther("1"));
+
+      // Approve LaunchPool to spend test tokens
+      await testToken
+        .connect(user1)
+        .approve(await launchPool.getAddress(), ethers.parseEther("1"));
+      await testToken
+        .connect(user2)
+        .approve(await launchPool.getAddress(), ethers.parseEther("1"));
+    });
+
+    it("Should handle rewards distribution with different stake ratios", async function () {
+      const rewardPerSecond = await launchPool.rewardPerSecond();
+      const precisionFactor = await launchPool.PRECISION_FACTOR();
+
+      await time.increaseTo(startTime);
+
+      // User1 deposits 0.1 ETH
+      const user1Deposit = ethers.parseEther("0.1");
+      await launchPool.connect(user1).deposit(user1Deposit);
+
+      // User2 deposits 0.2 ETH
+      const user2Deposit = ethers.parseEther("0.2");
+      await launchPool.connect(user2).deposit(user2Deposit);
+
+      // Move to end time
+      await time.increaseTo(endTime + 1);
+
+      // User2 claims
+      const beforeUser2Balance = await rewardToken.balanceOf(user2.address);
+      await launchPool.connect(user2).claimReward();
+      const afterUser2Balance = await rewardToken.balanceOf(user2.address);
+      const user2Reward = afterUser2Balance - beforeUser2Balance;
+
+      // User1 claims
+      const beforeUser1Balance = await rewardToken.balanceOf(user1.address);
+      await launchPool.connect(user1).claimReward();
+      const afterUser1Balance = await rewardToken.balanceOf(user1.address);
+      const user1Reward = afterUser1Balance - beforeUser1Balance;
+
+      // Calculate expected rewards
+      // First second: User1 gets full reward
+      const firstSecondReward = rewardPerSecond;
+      const firstSecondAccTokenPerShare =
+        (firstSecondReward * precisionFactor) / user1Deposit;
+      const user1FirstSecondReward =
+        (user1Deposit * firstSecondAccTokenPerShare) / precisionFactor;
+
+      // Remaining 598 seconds: Split between User1 (1/3) and User2 (2/3)
+      const remainingReward = rewardPerSecond * BigInt(598);
+      const totalStaked = user1Deposit + user2Deposit;
+      const remainingAccTokenPerShare =
+        (remainingReward * precisionFactor) / totalStaked;
+      const user1RemainingReward =
+        (user1Deposit * remainingAccTokenPerShare) / precisionFactor;
+      const user2RemainingReward =
+        (user2Deposit * remainingAccTokenPerShare) / precisionFactor;
+
+      // Total expected rewards
+      const expectedUser1Total = user1FirstSecondReward + user1RemainingReward;
+      const expectedUser2Total = user2RemainingReward;
+
+      // Verify rewards
+      expect(user1Reward).to.be.closeTo(
+        expectedUser1Total,
+        ethers.parseEther("0.1")
+      );
+      expect(user2Reward).to.be.closeTo(
+        expectedUser2Total,
+        ethers.parseEther("0.1")
+      );
+
+      // Total distributed should be less than or equal to 1000
+      expect(user1Reward + user2Reward).to.be.lte(ethers.parseEther("1000"));
     });
   });
 
@@ -454,12 +684,14 @@ describe("LaunchPool", function () {
       };
 
       const ETH_ADDRESS = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
-      const initialPool = {
-        stakedTokens: [await ethers.getContractAt("IERC20", ETH_ADDRESS)],
-        poolRewardAmounts: [ethers.parseEther("360")],
-        poolLimitPerUsers: [ethers.parseEther("10")],
-        minStakeAmounts: [ethers.parseEther("1")],
-      };
+      const initialPools = [
+        {
+          stakedToken: await ethers.getContractAt("IERC20", ETH_ADDRESS),
+          poolRewardAmount: ethers.parseEther("360"),
+          poolLimitPerUser: ethers.parseEther("10"),
+          minStakeAmount: ethers.parseEther("1"),
+        },
+      ];
 
       await factory.createProject(
         rewardToken,
@@ -467,7 +699,7 @@ describe("LaunchPool", function () {
         startTime,
         endTime,
         metadata,
-        initialPool,
+        initialPools,
         projectOwner.address
       );
 
@@ -548,7 +780,7 @@ describe("LaunchPool", function () {
       );
     });
 
-    it("Should handle ETH emergency withdrawal", async function () {
+    it("Should handle ETH emergency withdrawal in PAUSED state", async function () {
       await time.increaseTo(startTime);
 
       // User1 deposits ETH
@@ -556,6 +788,9 @@ describe("LaunchPool", function () {
         value: ethers.parseEther("5"),
       });
       await time.increase(900);
+
+      // Set project status to PAUSED
+      await factory.connect(projectOwner).updateProjectStatus(projectId, 3); // PAUSED
 
       const beforeBalance = await ethers.provider.getBalance(user1.address);
       const tx = await ethPool.connect(user1).emergencyWithdraw();
@@ -587,12 +822,14 @@ describe("LaunchPool", function () {
       const testToken = await MockToken.deploy();
       await testToken.waitForDeployment();
 
-      const initialPool = {
-        stakedTokens: [testToken],
-        poolRewardAmounts: [ethers.parseEther("360")],
-        poolLimitPerUsers: [ethers.parseEther("100")],
-        minStakeAmounts: [ethers.parseEther("10")],
-      };
+      const initialPools = [
+        {
+          stakedToken: testToken,
+          poolRewardAmount: ethers.parseEther("360"),
+          poolLimitPerUser: ethers.parseEther("100"),
+          minStakeAmount: ethers.parseEther("10"),
+        },
+      ];
 
       await factory.createProject(
         rewardToken,
@@ -608,7 +845,7 @@ describe("LaunchPool", function () {
           telegram: "https://t.me/test",
           tokenInfo: "Test Token Info",
         },
-        initialPool,
+        initialPools,
         projectOwner.address
       );
 
@@ -625,7 +862,7 @@ describe("LaunchPool", function () {
           to: await erc20Pool.getAddress(),
           value: ethers.parseEther("1"),
         })
-      ).to.be.revertedWith("Not ETH pool");
+      ).to.be.revertedWith("Use deposit() to stake ETH");
     });
   });
 });

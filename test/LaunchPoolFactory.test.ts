@@ -7,6 +7,16 @@ import {
   MockToken,
 } from "../typechain-types";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+import { LaunchPoolFactoryUpgradeable as LaunchPoolFactoryType } from "../typechain-types/contracts/LaunchPoolFactoryUpgradeable";
+
+type InitialPoolParams = {
+  stakedToken: MockToken;
+  poolRewardAmount: bigint;
+  poolLimitPerUser: bigint;
+  minStakeAmount: bigint;
+};
+
+const emptyPools: InitialPoolParams[] = [];
 
 describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
   async function deployFixture() {
@@ -76,12 +86,14 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
         tokenInfo: "Test Token Info",
       };
 
-      const initialPool = {
-        stakedTokens: [testToken],
-        poolRewardAmounts: [ethers.parseEther("360")], // 0.1 tokens per second * 3600 seconds
-        poolLimitPerUsers: [ethers.parseEther("100")],
-        minStakeAmounts: [ethers.parseEther("10")],
-      };
+      const initialPools: InitialPoolParams[] = [
+        {
+          stakedToken: testToken,
+          poolRewardAmount: ethers.parseEther("360"), // 0.1 tokens per second * 3600 seconds
+          poolLimitPerUser: ethers.parseEther("100"),
+          minStakeAmount: ethers.parseEther("10"),
+        },
+      ];
 
       await expect(
         factory.createProject(
@@ -90,7 +102,7 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
           startTime,
           endTime,
           metadata,
-          initialPool,
+          initialPools,
           projectOwner.address
         )
       )
@@ -127,13 +139,6 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
         tokenInfo: "Test Token Info",
       };
 
-      const emptyPool = {
-        stakedTokens: [],
-        poolRewardAmounts: [],
-        poolLimitPerUsers: [],
-        minStakeAmounts: [],
-      };
-
       await expect(
         factory.createProject(
           rewardToken,
@@ -141,7 +146,7 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
           startTime,
           endTime,
           metadata,
-          emptyPool,
+          emptyPools,
           projectOwner.address
         )
       ).to.emit(factory, "NewProject");
@@ -170,20 +175,13 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
         tokenInfo: "Test Token Info",
       };
 
-      const emptyPool = {
-        stakedTokens: [],
-        poolRewardAmounts: [],
-        poolLimitPerUsers: [],
-        minStakeAmounts: [],
-      };
-
       await factory.createProject(
         rewardToken,
         ethers.parseEther("360"),
         startTime,
         endTime,
         metadata,
-        emptyPool,
+        emptyPools,
         projectOwner.address
       );
 
@@ -235,13 +233,6 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
         tokenInfo: "Test Token Info",
       };
 
-      const emptyPool = {
-        stakedTokens: [],
-        poolRewardAmounts: [],
-        poolLimitPerUsers: [],
-        minStakeAmounts: [],
-      };
-
       await expect(
         factory
           .connect(user)
@@ -251,7 +242,7 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
             startTime,
             endTime,
             metadata,
-            emptyPool,
+            emptyPools,
             projectOwner.address
           )
       ).to.be.revertedWith("Ownable: caller is not the owner");
@@ -272,12 +263,14 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
         tokenInfo: "Test Token Info",
       };
 
-      const initialPool = {
-        stakedTokens: [rewardToken], // Same as reward token
-        poolRewardAmounts: [ethers.parseEther("360")],
-        poolLimitPerUsers: [ethers.parseEther("100")],
-        minStakeAmounts: [ethers.parseEther("10")],
-      };
+      const initialPools: InitialPoolParams[] = [
+        {
+          stakedToken: rewardToken, // Same as reward token
+          poolRewardAmount: ethers.parseEther("360"),
+          poolLimitPerUser: ethers.parseEther("100"),
+          minStakeAmount: ethers.parseEther("10"),
+        },
+      ];
 
       await expect(
         factory.createProject(
@@ -286,7 +279,7 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
           startTime,
           endTime,
           metadata,
-          initialPool,
+          initialPools,
           projectOwner.address
         )
       ).to.be.revertedWith("Tokens must be different");
@@ -320,12 +313,14 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
         tokenInfo: "Test Token Info",
       };
 
-      const initialPool = {
-        stakedTokens: [testToken],
-        poolRewardAmounts: [ethers.parseEther("360")], // 0.1 tokens per second * 3600 seconds
-        poolLimitPerUsers: [ethers.parseEther("100")],
-        minStakeAmounts: [ethers.parseEther("10")],
-      };
+      const initialPools: InitialPoolParams[] = [
+        {
+          stakedToken: testToken,
+          poolRewardAmount: ethers.parseEther("360"), // 0.1 tokens per second * 3600 seconds
+          poolLimitPerUser: ethers.parseEther("100"),
+          minStakeAmount: ethers.parseEther("10"),
+        },
+      ];
 
       await factory.createProject(
         rewardToken,
@@ -333,7 +328,7 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
         startTime,
         endTime,
         metadata,
-        initialPool,
+        initialPools,
         projectOwner.address
       );
 
@@ -476,12 +471,14 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
         tokenInfo: "Test Token Info",
       };
 
-      const initialPool = {
-        stakedTokens: [testToken],
-        poolRewardAmounts: [ethers.parseEther("360")],
-        poolLimitPerUsers: [ethers.parseEther("100")],
-        minStakeAmounts: [ethers.parseEther("10")],
-      };
+      const initialPools: InitialPoolParams[] = [
+        {
+          stakedToken: testToken,
+          poolRewardAmount: ethers.parseEther("360"),
+          poolLimitPerUser: ethers.parseEther("100"),
+          minStakeAmount: ethers.parseEther("10"),
+        },
+      ];
 
       await factory.createProject(
         rewardToken,
@@ -489,7 +486,7 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
         startTime,
         endTime,
         metadata,
-        initialPool,
+        initialPools,
         projectOwner.address
       );
 
@@ -574,11 +571,28 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
       // Try to stake while paused
       await expect(
         launchPool.connect(user).deposit(ethers.parseEther("10"))
-      ).to.be.revertedWith("Pool not active");
+      ).to.be.revertedWith("Pool must be active or ready");
 
-      // Move back to READY
+      // Move back to STAGING
       await factory.connect(projectOwner).updateProjectStatus(projectId, 0); // STAGING
-      await factory.connect(projectOwner).updateProjectStatus(projectId, 1); // READY
+
+      // Wait for status update to be mined
+      await ethers.provider.send("evm_mine", []);
+
+      // Re-fund the pool since we're back in STAGING
+      await rewardToken.mint(projectOwner.address, ethers.parseEther("360"));
+      await rewardToken
+        .connect(projectOwner)
+        .approve(await factory.getAddress(), ethers.parseEther("360"));
+      await factory
+        .connect(projectOwner)
+        .fundPool(
+          projectId,
+          await launchPool.getAddress(),
+          ethers.parseEther("360")
+        );
+
+      // Pool should automatically move to READY after funding
 
       // Should be able to stake again
       await expect(
@@ -587,15 +601,14 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
     });
 
     it("Should respect project ownership for admin functions", async function () {
-      // Only project owner should be able to stop reward
-      await expect(launchPool.connect(user).stopReward()).to.be.revertedWith(
-        "Not project owner"
-      );
+      // Only project owner should be able to stop project
+      await expect(
+        factory.connect(user).stopProject(projectId)
+      ).to.be.revertedWith("Not project owner");
 
-      await expect(launchPool.connect(projectOwner).stopReward()).to.emit(
-        launchPool,
-        "RewardsStop"
-      );
+      await expect(
+        factory.connect(projectOwner).stopProject(projectId)
+      ).to.emit(factory, "ProjectStatusUpdated");
 
       // Only project owner should be able to update pool limit
       await expect(

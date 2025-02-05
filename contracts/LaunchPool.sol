@@ -70,10 +70,8 @@ contract LaunchPool is ReentrancyGuard {
     event Deposit(address indexed user, uint256 amount);
     event EmergencyWithdraw(address indexed user, uint256 amount);
     event NewStartAndEndTimes(uint256 startTime, uint256 endTime);
-    event NewRewardPerSecond(uint256 rewardPerSecond);
     event NewPoolLimit(uint256 poolLimitPerUser);
     event NewMinStakeAmount(uint256 minStakeAmount);
-    event RewardsStop(uint256 timestamp);
     event Withdraw(address indexed user, uint256 amount);
     event RewardClaimed(address indexed user, uint256 amount);
 
@@ -105,15 +103,12 @@ contract LaunchPool is ReentrancyGuard {
             poolLimitPerUser = _poolLimitPerUser;
         }
 
-        // Calculate reward per second using factory
         rewardPerSecond = factory.calculateRewardPerSecond(projectId, _poolRewardAmount);
 
-        // Set up precision factor
         uint256 decimalsRewardToken = IERC20Metadata(address(rewardToken())).decimals();
-        require(decimalsRewardToken < 30, "Must be inferior to 30");
-        PRECISION_FACTOR = 10**(uint256(30) - decimalsRewardToken);
+        require(decimalsRewardToken < 36, "Must be inferior to 36");
+        PRECISION_FACTOR = 10**(uint256(36) - decimalsRewardToken);
 
-        // Set last reward time to project start time
         (uint256 startTime,) = getProjectTimes();
         lastRewardTime = startTime;
     }
@@ -130,16 +125,14 @@ contract LaunchPool is ReentrancyGuard {
         return factory.getProjectTimes(projectId);
     }
 
-    // ETH address constant
     address constant internal ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
     function deposit(uint256 _amount) external virtual payable nonReentrant {
         UserInfo storage user = userInfo[msg.sender];
 
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
-        require(statusHash == ACTIVE, "Pool not active");
+        require(statusHash == ACTIVE || statusHash == READY, "Pool must be active or ready");
 
-        // Only check minimum stake amount when deposit amount is greater than 0
         if (_amount > 0) {
             require(_amount >= minStakeAmount, "Amount below minimum stake");
             if (hasUserLimit) {
@@ -158,9 +151,9 @@ contract LaunchPool is ReentrancyGuard {
 
         if (_amount > 0) {
             user.amount = user.amount + _amount;
+            totalStaked += _amount;
             if (address(stakedToken) == ETH) {
                 require(msg.value == _amount, "Invalid ETH amount");
-                totalStaked += _amount;
             } else {
                 stakedToken.safeTransferFrom(msg.sender, address(this), _amount);
             }
@@ -174,7 +167,14 @@ contract LaunchPool is ReentrancyGuard {
     function withdraw(uint256 _amount) external nonReentrant {
         UserInfo storage user = userInfo[msg.sender];
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
-        require(statusHash != PAUSED && statusHash != DELISTED, "Pool not available");
+        require(
+            statusHash == ACTIVE || 
+            statusHash == ENDED || 
+            statusHash == PAUSED || 
+            statusHash == DELISTED ||
+            statusHash == READY,
+            "Pool must be active, ended, paused, delisted or ready"
+        );
         require(user.amount >= _amount, "Amount to withdraw too high");
 
         _updatePool();
@@ -186,8 +186,8 @@ contract LaunchPool is ReentrancyGuard {
 
         if (_amount > 0) {
             user.amount = user.amount - _amount;
+            totalStaked -= _amount;
             if (address(stakedToken) == ETH) {
-                totalStaked -= _amount;
                 (bool success, ) = msg.sender.call{value: _amount}("");
                 require(success, "ETH transfer failed");
             } else {
@@ -205,6 +205,7 @@ contract LaunchPool is ReentrancyGuard {
         require(statusHash == ENDED, "Pool not ended");
         
         UserInfo storage user = userInfo[msg.sender];
+
         _updatePool();
 
         uint256 pending = user.amount * accTokenPerShare / PRECISION_FACTOR - user.rewardDebt;
@@ -221,7 +222,7 @@ contract LaunchPool is ReentrancyGuard {
 
     function emergencyWithdraw() external nonReentrant {
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
-        require(statusHash != PAUSED && statusHash != DELISTED, "Pool not available");
+        require(statusHash == PAUSED || statusHash == DELISTED, "Pool must be paused or delisted");
         UserInfo storage user = userInfo[msg.sender];
         uint256 amountToTransfer = user.amount;
         user.amount = 0;
@@ -229,8 +230,8 @@ contract LaunchPool is ReentrancyGuard {
         user.pendingRewards = 0;
 
         if (amountToTransfer > 0) {
+            totalStaked -= amountToTransfer;
             if (address(stakedToken) == ETH) {
-                totalStaked -= amountToTransfer;
                 (bool success, ) = msg.sender.call{value: amountToTransfer}("");
                 require(success, "ETH transfer failed");
             } else {
@@ -241,9 +242,12 @@ contract LaunchPool is ReentrancyGuard {
         emit EmergencyWithdraw(msg.sender, amountToTransfer);
     }
 
-    // Add receive function to accept ETH
     receive() external payable {
-        require(address(stakedToken) == ETH, "Not ETH pool");
+        revert("Use deposit() to stake ETH");
+    }
+
+    fallback() external payable {
+        revert("Use deposit() to stake ETH");
     }
 
     function emergencyRewardWithdraw(uint256 _amount) external onlyProjectOwner {
@@ -253,91 +257,66 @@ contract LaunchPool is ReentrancyGuard {
     }
 
     function recoverWrongTokens(address _tokenAddress, uint256 _tokenAmount) external onlyProjectOwner {
-        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
-        require(statusHash == PAUSED || statusHash == DELISTED, "Pool must be paused or delisted");
         require(_tokenAddress != address(stakedToken), "Cannot be staked token");
         require(_tokenAddress != address(rewardToken()), "Cannot be reward token");
+        require(_tokenAmount > 0, "Amount must be positive");
+        require(_tokenAmount <= IERC20(_tokenAddress).balanceOf(address(this)), "Insufficient balance");
 
         IERC20(_tokenAddress).safeTransfer(msg.sender, _tokenAmount);
-
         emit AdminTokenRecovery(_tokenAddress, _tokenAmount);
     }
 
-    function stopReward() external onlyProjectOwner {
-        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
-        require(statusHash == ACTIVE || statusHash == READY, "Pool not in active or ready state");
-        (,uint256 endTime) = getProjectTimes();
-        endTime = block.timestamp;
-        emit RewardsStop(block.timestamp);
-    }
-
     function updatePoolLimitPerUser(bool _hasUserLimit, uint256 _poolLimitPerUser) external onlyProjectOwner {
-        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
-        require(statusHash == READY, "Pool not in ready state");
-        require(hasUserLimit, "Must be set");
         if (_hasUserLimit) {
-            require(_poolLimitPerUser > poolLimitPerUser, "New limit must be higher");
+            require(_poolLimitPerUser > 0, "Pool limit must be positive");
             poolLimitPerUser = _poolLimitPerUser;
+            hasUserLimit = true;
         } else {
-            hasUserLimit = _hasUserLimit;
+            hasUserLimit = false;
             poolLimitPerUser = 0;
         }
         emit NewPoolLimit(poolLimitPerUser);
     }
 
     function updateMinStakeAmount(uint256 _minStakeAmount) external onlyProjectOwner {
-        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
-        require(statusHash == READY, "Pool not in ready state");
         minStakeAmount = _minStakeAmount;
         emit NewMinStakeAmount(_minStakeAmount);
     }
 
-    function updateRewardPerSecond(uint256 _rewardPerSecond) external onlyProjectOwner {
-        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
-        require(statusHash == READY, "Pool not in ready state");
-        rewardPerSecond = _rewardPerSecond;
-        emit NewRewardPerSecond(_rewardPerSecond);
-    }
-
     function pendingReward(address _user) external view returns (uint256) {
         UserInfo storage user = userInfo[_user];
-        uint256 stakedTokenSupply = address(stakedToken) == ETH ? totalStaked : stakedToken.balanceOf(address(this));
+        uint256 stakedTokenSupply = totalStaked;
         uint256 currentAccTokenPerShare = accTokenPerShare;
         (uint256 startTime, uint256 endTime) = getProjectTimes();
         
-        // If current time is less than or equal to last reward time, return current rewards
         if (block.timestamp <= lastRewardTime) {
             return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
         }
 
-        // If current time is less than start time, return current rewards
         if (block.timestamp < startTime) {
             return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
         }
 
-        // If last reward time is greater than or equal to end time, return current rewards
         if (lastRewardTime >= endTime) {
             return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
         }
 
-        // If no staked tokens, return current rewards
         if (stakedTokenSupply == 0) {
             return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
         }
 
-        // Calculate end point (not exceeding end time)
         uint256 endPoint = block.timestamp > endTime ? endTime : block.timestamp;
         
-        // If last reward time is greater than or equal to end point, return current rewards
         if (lastRewardTime >= endPoint) {
             return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
         }
 
-        // Calculate new rewards
         uint256 multiplier = PoolLib.getMultiplier(lastRewardTime, endPoint, startTime, endTime);
         uint256 reward = multiplier * rewardPerSecond;
+        
         if (stakedTokenSupply > 0) {
-            currentAccTokenPerShare = currentAccTokenPerShare + reward * PRECISION_FACTOR / stakedTokenSupply;
+            uint256 addition = reward * PRECISION_FACTOR / stakedTokenSupply;
+            currentAccTokenPerShare = currentAccTokenPerShare + addition;
         }
         
         return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;

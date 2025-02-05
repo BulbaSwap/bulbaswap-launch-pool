@@ -54,12 +54,14 @@ describe("Access Control", function () {
       tokenInfo: "Test Token Info",
     };
 
-    const initialPool = {
-      stakedTokens: [testToken],
-      poolRewardAmounts: [ethers.parseEther("360")],
-      poolLimitPerUsers: [ethers.parseEther("100")],
-      minStakeAmounts: [ethers.parseEther("10")],
-    };
+    const initialPools = [
+      {
+        stakedToken: testToken,
+        poolRewardAmount: ethers.parseEther("360"),
+        poolLimitPerUser: ethers.parseEther("100"),
+        minStakeAmount: ethers.parseEther("10"),
+      },
+    ];
 
     await factory.createProject(
       rewardToken,
@@ -67,7 +69,7 @@ describe("Access Control", function () {
       startTime,
       endTime,
       metadata,
-      initialPool,
+      initialPools,
       projectOwner.address
     );
 
@@ -129,12 +131,12 @@ describe("Access Control", function () {
         tokenInfo: "Test Token Info",
       };
 
-      const emptyPool = {
-        stakedTokens: [],
-        poolRewardAmounts: [],
-        poolLimitPerUsers: [],
-        minStakeAmounts: [],
-      };
+      const emptyPools = [] as {
+        stakedToken: MockToken;
+        poolRewardAmount: bigint;
+        poolLimitPerUser: bigint;
+        minStakeAmount: bigint;
+      }[];
 
       await expect(
         factory
@@ -145,7 +147,7 @@ describe("Access Control", function () {
             startTime,
             endTime,
             metadata,
-            emptyPool,
+            emptyPools,
             projectOwner.address
           )
       ).to.be.revertedWith("Ownable: caller is not the owner");
@@ -166,12 +168,12 @@ describe("Access Control", function () {
         tokenInfo: "Test Token Info",
       };
 
-      const emptyPool = {
-        stakedTokens: [],
-        poolRewardAmounts: [],
-        poolLimitPerUsers: [],
-        minStakeAmounts: [],
-      };
+      const emptyPools = [] as {
+        stakedToken: MockToken;
+        poolRewardAmount: bigint;
+        poolLimitPerUser: bigint;
+        minStakeAmount: bigint;
+      }[];
 
       await expect(
         factory.createProject(
@@ -180,7 +182,7 @@ describe("Access Control", function () {
           startTime,
           endTime,
           metadata,
-          emptyPool,
+          emptyPools,
           projectOwner.address
         )
       ).to.emit(factory, "NewProject");
@@ -276,10 +278,17 @@ describe("Access Control", function () {
     });
 
     it("Should only allow project owner to update minimum stake amount", async function () {
+      // Non-owner should not be able to update
       await expect(
         launchPool.connect(user1).updateMinStakeAmount(ethers.parseEther("20"))
       ).to.be.revertedWith("Not project owner");
 
+      // Project owner should be able to set zero minimum stake
+      await expect(launchPool.connect(projectOwner).updateMinStakeAmount(0))
+        .to.emit(launchPool, "NewMinStakeAmount")
+        .withArgs(0);
+
+      // Project owner should be able to update to positive value
       await expect(
         launchPool
           .connect(projectOwner)
@@ -290,12 +299,19 @@ describe("Access Control", function () {
     });
 
     it("Should only allow project owner to update pool limit", async function () {
+      // Non-owner should not be able to update
       await expect(
         launchPool
           .connect(user1)
           .updatePoolLimitPerUser(true, ethers.parseEther("200"))
       ).to.be.revertedWith("Not project owner");
 
+      // Cannot set zero pool limit when enabling limit
+      await expect(
+        launchPool.connect(projectOwner).updatePoolLimitPerUser(true, 0)
+      ).to.be.revertedWith("Pool limit must be positive");
+
+      // Project owner should be able to update with positive limit
       await expect(
         launchPool
           .connect(projectOwner)
@@ -303,17 +319,23 @@ describe("Access Control", function () {
       )
         .to.emit(launchPool, "NewPoolLimit")
         .withArgs(ethers.parseEther("200"));
+
+      // Project owner should be able to disable limit
+      await expect(
+        launchPool.connect(projectOwner).updatePoolLimitPerUser(false, 0)
+      )
+        .to.emit(launchPool, "NewPoolLimit")
+        .withArgs(0);
     });
 
-    it("Should only allow project owner to stop rewards", async function () {
-      await expect(launchPool.connect(user1).stopReward()).to.be.revertedWith(
-        "Not project owner"
-      );
+    it("Should only allow project owner to stop project", async function () {
+      await expect(
+        factory.connect(user1).stopProject(projectId)
+      ).to.be.revertedWith("Not project owner");
 
-      await expect(launchPool.connect(projectOwner).stopReward()).to.emit(
-        launchPool,
-        "RewardsStop"
-      );
+      await expect(
+        factory.connect(projectOwner).stopProject(projectId)
+      ).to.emit(factory, "ProjectStatusUpdated");
     });
 
     it("Should only allow project owner to recover wrong tokens", async function () {
@@ -326,8 +348,7 @@ describe("Access Control", function () {
         ethers.parseEther("100")
       );
 
-      await factory.connect(projectOwner).updateProjectStatus(projectId, 3); // PAUSED
-
+      // Non-owner should not be able to recover
       await expect(
         launchPool
           .connect(user1)
@@ -337,6 +358,24 @@ describe("Access Control", function () {
           )
       ).to.be.revertedWith("Not project owner");
 
+      // Cannot recover zero amount
+      await expect(
+        launchPool
+          .connect(projectOwner)
+          .recoverWrongTokens(await wrongToken.getAddress(), 0)
+      ).to.be.revertedWith("Amount must be positive");
+
+      // Cannot recover more than balance
+      await expect(
+        launchPool
+          .connect(projectOwner)
+          .recoverWrongTokens(
+            await wrongToken.getAddress(),
+            ethers.parseEther("200")
+          )
+      ).to.be.revertedWith("Insufficient balance");
+
+      // Project owner should be able to recover wrong tokens
       await expect(
         launchPool
           .connect(projectOwner)
@@ -345,22 +384,6 @@ describe("Access Control", function () {
             ethers.parseEther("100")
           )
       ).to.emit(launchPool, "AdminTokenRecovery");
-    });
-
-    it("Should only allow project owner to update reward per second before start", async function () {
-      await expect(
-        launchPool
-          .connect(user1)
-          .updateRewardPerSecond(ethers.parseEther("0.2"))
-      ).to.be.revertedWith("Not project owner");
-
-      await expect(
-        launchPool
-          .connect(projectOwner)
-          .updateRewardPerSecond(ethers.parseEther("0.2"))
-      )
-        .to.emit(launchPool, "NewRewardPerSecond")
-        .withArgs(ethers.parseEther("0.2"));
     });
 
     it("Should only allow project owner to perform emergency reward withdrawal", async function () {

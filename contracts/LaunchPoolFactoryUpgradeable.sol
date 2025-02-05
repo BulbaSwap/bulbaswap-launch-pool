@@ -130,20 +130,76 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         return launchPoolAddress;
     }
 
-    function getProjectRewardToken(uint256 _projectId) external view returns (IERC20) {
+    // Project information struct for frontend
+    struct ProjectInfo {
+        IERC20 rewardToken;
+        uint256 totalRewardAmount;
+        uint256 startTime;
+        uint256 endTime;
+        ProjectStatus status;
+        address[] pools;
+        PoolMetadata metadata;
+        address owner;
+        PoolInfo[] poolInfos;
+        string currentStatus;
+        bool isActive;
+    }
+
+    // Get complete project information
+    function getProject(uint256 _projectId) external view returns (ProjectInfo memory) {
+        ProjectToken storage project = projects[_projectId];
+        
+        string memory currentStatus;
+        bool isActive;
+        
+        if (project.status == ProjectStatus.DELISTED) {
+            currentStatus = "DELISTED";
+            isActive = false;
+        } else if (project.status == ProjectStatus.PAUSED) {
+            currentStatus = "PAUSED";
+            isActive = false;
+        } else if (project.status == ProjectStatus.READY) {
+            if (block.timestamp >= project.endTime) {
+                currentStatus = "ENDED";
+                isActive = false;
+            } else if (block.timestamp >= project.startTime) {
+                currentStatus = "ACTIVE";
+                isActive = true;
+            } else {
+                currentStatus = "READY";
+                isActive = false;
+            }
+        } else {
+            currentStatus = "STAGING";
+            isActive = false;
+        }
+
+        return ProjectInfo({
+            rewardToken: project.rewardToken,
+            totalRewardAmount: project.totalRewardAmount,
+            startTime: project.startTime,
+            endTime: project.endTime,
+            status: project.status,
+            pools: project.pools,
+            metadata: project.metadata,
+            owner: project.owner,
+            poolInfos: projects.getProjectPools(_projectId),
+            currentStatus: currentStatus,
+            isActive: isActive
+        });
+    }
+
+    // Internal functions used by LaunchPool contract
+    function _getProjectRewardToken(uint256 _projectId) internal view returns (IERC20) {
         return projects[_projectId].rewardToken;
     }
 
-    function getProjectTimes(uint256 _projectId) external view returns (uint256 startTime, uint256 endTime) {
+    function _getProjectTimes(uint256 _projectId) internal view returns (uint256 startTime, uint256 endTime) {
         ProjectToken storage project = projects[_projectId];
         return (project.startTime, project.endTime);
     }
 
-    function calculateRewardPerSecond(uint256 _projectId, uint256 _poolRewardAmount) public view returns (uint256) {
-        return projects.calculateRewardPerSecond(_projectId, _poolRewardAmount);
-    }
-
-    function getProjectStatus(uint256 _projectId) public view returns (string memory) {
+    function _getProjectStatus(uint256 _projectId) internal view returns (string memory) {
         ProjectToken storage project = projects[_projectId];
         
         if (project.status == ProjectStatus.DELISTED) {
@@ -166,36 +222,38 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         return "STAGING";
     }
 
-    function isProjectActive(uint256 _projectId) public view returns (bool) {
-        ProjectToken storage project = projects[_projectId];
-        return project.status == ProjectStatus.READY &&
-               block.timestamp >= project.startTime &&
-               block.timestamp < project.endTime;
+    // External functions needed by LaunchPool contract
+    function getProjectRewardToken(uint256 _projectId) external view returns (IERC20) {
+        return _getProjectRewardToken(_projectId);
+    }
+
+    function getProjectTimes(uint256 _projectId) external view returns (uint256 startTime, uint256 endTime) {
+        return _getProjectTimes(_projectId);
+    }
+
+    function getProjectStatus(uint256 _projectId) external view returns (string memory) {
+        return _getProjectStatus(_projectId);
+    }
+
+    function calculateRewardPerSecond(uint256 _projectId, uint256 _poolRewardAmount) public view returns (uint256) {
+        return projects.calculateRewardPerSecond(_projectId, _poolRewardAmount);
     }
 
     struct InitialPoolParams {
-        IERC20[] stakedTokens;
-        uint256[] poolRewardAmounts;
-        uint256[] poolLimitPerUsers;
-        uint256[] minStakeAmounts;
+        IERC20 stakedToken;
+        uint256 poolRewardAmount;
+        uint256 poolLimitPerUser;
+        uint256 minStakeAmount;
     }
 
     function _validateInitialPools(
-        InitialPoolParams calldata _initialPool,
+        InitialPoolParams[] calldata _pools,
         uint256 _totalRewardAmount
     ) internal pure {
-        // Check array lengths match
-        require(
-            _initialPool.stakedTokens.length == _initialPool.poolRewardAmounts.length &&
-            _initialPool.stakedTokens.length == _initialPool.poolLimitPerUsers.length &&
-            _initialPool.stakedTokens.length == _initialPool.minStakeAmounts.length,
-            "Array lengths must match"
-        );
-
         // Calculate total reward amount
         uint256 totalPoolRewards;
-        for (uint256 i = 0; i < _initialPool.poolRewardAmounts.length; i++) {
-            totalPoolRewards += _initialPool.poolRewardAmounts[i];
+        for (uint256 i = 0; i < _pools.length; i++) {
+            totalPoolRewards += _pools[i].poolRewardAmount;
         }
         require(totalPoolRewards <= _totalRewardAmount, "Pool rewards exceed total");
     }
@@ -206,12 +264,12 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         uint256 _startTime,
         uint256 _endTime,
         PoolMetadata calldata _metadata,
-        InitialPoolParams calldata _initialPool,
+        InitialPoolParams[] calldata _pools,
         address _projectOwner
     ) internal virtual returns (uint256) {
         // Validate initial pools if any
-        if (_initialPool.stakedTokens.length > 0) {
-            _validateInitialPools(_initialPool, _totalRewardAmount);
+        if (_pools.length > 0) {
+            _validateInitialPools(_pools, _totalRewardAmount);
         }
 
         uint256 projectId = projects.createProject(
@@ -227,13 +285,13 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         nextProjectId++;
 
         // Create initial pools if provided
-        for (uint256 i = 0; i < _initialPool.stakedTokens.length; i++) {
+        for (uint256 i = 0; i < _pools.length; i++) {
             address poolAddress = _deployPool(
                 projectId,
-                _initialPool.stakedTokens[i],
-                _initialPool.poolRewardAmounts[i],
-                _initialPool.poolLimitPerUsers[i],
-                _initialPool.minStakeAmounts[i]
+                _pools[i].stakedToken,
+                _pools[i].poolRewardAmount,
+                _pools[i].poolLimitPerUser,
+                _pools[i].minStakeAmount
             );
             
             // Record funding requirement
@@ -249,7 +307,7 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         uint256 _startTime,
         uint256 _endTime,
         PoolMetadata calldata _metadata,
-        InitialPoolParams calldata _initialPool,
+        InitialPoolParams[] calldata _pools,
         address _projectOwner
     ) external onlyOwner returns (uint256) {
         return _createProject(
@@ -258,7 +316,7 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
             _startTime,
             _endTime,
             _metadata,
-            _initialPool,
+            _pools,
             _projectOwner
         );
     }
@@ -286,7 +344,7 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
     }
 
     function isProjectOwner(uint256 _projectId, address _address) public view returns (bool) {
-        return projects[_projectId].owner == _address;
+        return getProjectOwner(_projectId) == _address;
     }
 
     function addPoolToProject(
@@ -313,6 +371,17 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
 
     function getProjectPools(uint256 _projectId) external view returns (PoolInfo[] memory) {
         return projects.getProjectPools(_projectId);
+    }
+
+    function stopProject(uint256 _projectId) external {
+        require(msg.sender == projects[_projectId].owner, "Not project owner");
+        ProjectToken storage project = projects[_projectId];
+        require(
+            project.status == ProjectStatus.READY,
+            "Project not in ready state"
+        );
+        project.endTime = block.timestamp;
+        emit Events.ProjectStatusUpdated(_projectId, project.status);
     }
 
     /// @dev Prevents renouncing ownership since it would break the factory

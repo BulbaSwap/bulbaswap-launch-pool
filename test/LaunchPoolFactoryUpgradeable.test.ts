@@ -11,6 +11,13 @@ import {
 } from "../typechain-types";
 import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 
+type InitialPoolParams = {
+  stakedToken: MockToken;
+  poolRewardAmount: bigint;
+  poolLimitPerUser: bigint;
+  minStakeAmount: bigint;
+};
+
 describe("LaunchPoolFactoryUpgradeable (Upgrades)", function () {
   async function deployV1Fixture() {
     const [owner, projectOwner, user] = await ethers.getSigners();
@@ -105,12 +112,7 @@ describe("LaunchPoolFactoryUpgradeable (Upgrades)", function () {
         telegram: "t.me/test",
         tokenInfo: "Test Token",
       };
-      const emptyPool = {
-        stakedTokens: [],
-        poolRewardAmounts: [],
-        poolLimitPerUsers: [],
-        minStakeAmounts: [],
-      };
+      const emptyPools: InitialPoolParams[] = [];
 
       // Should allow creating up to maxProjectsPerOwner projects
       await factoryV2.createProject(
@@ -119,7 +121,7 @@ describe("LaunchPoolFactoryUpgradeable (Upgrades)", function () {
         now + 100,
         now + 3600,
         metadata,
-        emptyPool,
+        emptyPools,
         projectOwner.address
       );
 
@@ -129,7 +131,7 @@ describe("LaunchPoolFactoryUpgradeable (Upgrades)", function () {
         now + 100,
         now + 3600,
         metadata,
-        emptyPool,
+        emptyPools,
         projectOwner.address
       );
 
@@ -141,7 +143,7 @@ describe("LaunchPoolFactoryUpgradeable (Upgrades)", function () {
           now + 100,
           now + 3600,
           metadata,
-          emptyPool,
+          emptyPools,
           projectOwner.address
         )
       ).to.be.revertedWith("Too many projects");
@@ -216,12 +218,7 @@ describe("LaunchPoolFactoryUpgradeable (Upgrades)", function () {
         telegram: "t.me/test",
         tokenInfo: "Test Token",
       };
-      const emptyPool = {
-        stakedTokens: [],
-        poolRewardAmounts: [],
-        poolLimitPerUsers: [],
-        minStakeAmounts: [],
-      };
+      const emptyPools: InitialPoolParams[] = [];
 
       // Create first project
       await factoryV3.createProject(
@@ -230,7 +227,7 @@ describe("LaunchPoolFactoryUpgradeable (Upgrades)", function () {
         now + 100,
         now + 3600,
         metadata,
-        emptyPool,
+        emptyPools,
         projectOwner.address
       );
 
@@ -242,7 +239,7 @@ describe("LaunchPoolFactoryUpgradeable (Upgrades)", function () {
           now + 100,
           now + 3600,
           metadata,
-          emptyPool,
+          emptyPools,
           projectOwner.address
         )
       ).to.be.revertedWith("Must wait before creating new project");
@@ -254,7 +251,7 @@ describe("LaunchPoolFactoryUpgradeable (Upgrades)", function () {
         now + 24 * 60 * 60 + 100, // After minProjectInterval
         now + 24 * 60 * 60 + 3600,
         metadata,
-        emptyPool,
+        emptyPools,
         projectOwner.address
       );
     });
