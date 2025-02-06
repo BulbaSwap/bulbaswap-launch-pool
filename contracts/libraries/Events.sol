@@ -11,4 +11,5 @@ library Events {
     event PoolFunded(uint256 indexed projectId, address indexed pool);
     event ProjectOwnershipTransferred(uint256 indexed projectId, address indexed previousOwner, address indexed newOwner);
     event FactoryUpgraded(address indexed implementation);
+    event RemainingRewardsWithdrawn(address indexed owner, uint256 amount);
 }

@@ -283,6 +283,25 @@ contract LaunchPool is ReentrancyGuard {
         emit NewMinStakeAmount(_minStakeAmount);
     }
 
+    function getTotalDistributedRewards() public view returns (uint256) {
+        (uint256 startTime, uint256 endTime) = getProjectTimes();
+        uint256 duration = endTime - startTime;
+        return duration * rewardPerSecond;
+    }
+
+    function withdrawRemainingRewards() external onlyProjectOwner {
+        bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
+        require(statusHash == ENDED, "Pool must be ended");
+        
+        uint256 distributedRewards = getTotalDistributedRewards();
+        uint256 balance = rewardToken().balanceOf(address(this));
+        require(balance > distributedRewards, "No rewards to withdraw");
+        
+        uint256 remainingRewards = balance - distributedRewards;
+        rewardToken().safeTransfer(msg.sender, remainingRewards);
+        emit Events.RemainingRewardsWithdrawn(msg.sender, remainingRewards);
+    }
+
     function pendingReward(address _user) external view returns (uint256) {
         UserInfo storage user = userInfo[_user];
         uint256 stakedTokenSupply = totalStaked;
