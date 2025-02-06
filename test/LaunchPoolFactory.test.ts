@@ -357,8 +357,11 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
       await factory.connect(projectOwner).updateProjectStatus(projectId, 3); // PAUSED
       expect(await factory.getProjectStatus(projectId)).to.equal("PAUSED");
 
+      // Should be able to resume from PAUSED
+      await factory.connect(projectOwner).resumeProject(projectId); // Will go to READY since funds are sufficient
+      expect(await factory.getProjectStatus(projectId)).to.equal("READY");
+
       // Should be able to delist from READY
-      await factory.connect(projectOwner).updateProjectStatus(projectId, 0); // Back to STAGING
       await factory.connect(projectOwner).updateProjectStatus(projectId, 2); // DELISTED
       expect(await factory.getProjectStatus(projectId)).to.equal("DELISTED");
     });
@@ -573,26 +576,11 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
         launchPool.connect(user).deposit(ethers.parseEther("10"))
       ).to.be.revertedWith("Pool must be active or ready");
 
-      // Move back to STAGING
-      await factory.connect(projectOwner).updateProjectStatus(projectId, 0); // STAGING
+      // Resume project (will go to READY since funds are sufficient)
+      await factory.connect(projectOwner).resumeProject(projectId);
 
       // Wait for status update to be mined
       await ethers.provider.send("evm_mine", []);
-
-      // Re-fund the pool since we're back in STAGING
-      await rewardToken.mint(projectOwner.address, ethers.parseEther("360"));
-      await rewardToken
-        .connect(projectOwner)
-        .approve(await factory.getAddress(), ethers.parseEther("360"));
-      await factory
-        .connect(projectOwner)
-        .fundPool(
-          projectId,
-          await launchPool.getAddress(),
-          ethers.parseEther("360")
-        );
-
-      // Pool should automatically move to READY after funding
 
       // Should be able to stake again
       await expect(
@@ -601,14 +589,15 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
     });
 
     it("Should respect project ownership for admin functions", async function () {
-      // Only project owner should be able to stop project
+      // Only project owner should be able to end project
       await expect(
-        factory.connect(user).stopProject(projectId)
+        factory.connect(user).endProject(projectId)
       ).to.be.revertedWith("Not project owner");
 
-      await expect(
-        factory.connect(projectOwner).stopProject(projectId)
-      ).to.emit(factory, "ProjectStatusUpdated");
+      await expect(factory.connect(projectOwner).endProject(projectId)).to.emit(
+        factory,
+        "ProjectStatusUpdated"
+      );
 
       // Only project owner should be able to update pool limit
       await expect(

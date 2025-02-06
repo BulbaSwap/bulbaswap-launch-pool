@@ -66,24 +66,36 @@ library ProjectLib {
 
         if (_status == LaunchPoolFactoryUpgradeable.ProjectStatus.READY) {
             require(
-                project.status ==
-                    LaunchPoolFactoryUpgradeable.ProjectStatus.STAGING,
-                "Can only move to READY from STAGING"
-            );
-            require(
-                project.fundedPoolCount == project.pools.length,
-                "Not all pools funded"
+                project.status == LaunchPoolFactoryUpgradeable.ProjectStatus.STAGING ||
+                project.status == LaunchPoolFactoryUpgradeable.ProjectStatus.PAUSED,
+                "Can only move to READY from STAGING or PAUSED"
             );
 
+            // Check if total funds meet requirements
             uint256 totalAllocated = 0;
+            bool sufficientFunds = true;
+            
             for (uint256 i = 0; i < project.pools.length; i++) {
                 LaunchPool currentPool = LaunchPool(payable(project.pools[i]));
-                totalAllocated += currentPool.poolRewardAmount();
+                uint256 poolRewardAmount = currentPool.poolRewardAmount();
+                totalAllocated += poolRewardAmount;
+                
+                if (IERC20(project.rewardToken).balanceOf(project.pools[i]) < poolRewardAmount) {
+                    sufficientFunds = false;
+                    break;
+                }
             }
-            require(
-                totalAllocated == project.totalRewardAmount,
-                "Total allocated rewards must match total"
-            );
+
+            require(totalAllocated == project.totalRewardAmount, "Total allocated rewards must match total");
+            
+            // If coming from STAGING, check funding status
+            if (project.status == LaunchPoolFactoryUpgradeable.ProjectStatus.STAGING) {
+                require(project.fundedPoolCount == project.pools.length, "Not all pools funded");
+            }
+            // If coming from PAUSED, check if funds are sufficient
+            else if (project.status == LaunchPoolFactoryUpgradeable.ProjectStatus.PAUSED) {
+                require(sufficientFunds, "Insufficient funds to resume to READY");
+            }
         } else if (
             _status == LaunchPoolFactoryUpgradeable.ProjectStatus.DELISTED
         ) {
@@ -102,15 +114,25 @@ library ProjectLib {
                     LaunchPoolFactoryUpgradeable.ProjectStatus.READY,
                 "Can only pause from READY state"
             );
-        } else if (
-            _status == LaunchPoolFactoryUpgradeable.ProjectStatus.STAGING
-        ) {
+        } else if (_status == LaunchPoolFactoryUpgradeable.ProjectStatus.STAGING) {
             require(
-                project.status ==
-                    LaunchPoolFactoryUpgradeable.ProjectStatus.PAUSED,
+                project.status == LaunchPoolFactoryUpgradeable.ProjectStatus.PAUSED,
                 "Can only move to STAGING from PAUSED"
             );
-            // Reset funding status when moving from PAUSED to STAGING
+
+            // Check if funds are insufficient
+            bool insufficientFunds = false;
+            for (uint256 i = 0; i < project.pools.length; i++) {
+                LaunchPool currentPool = LaunchPool(payable(project.pools[i]));
+                if (IERC20(project.rewardToken).balanceOf(project.pools[i]) < currentPool.poolRewardAmount()) {
+                    insufficientFunds = true;
+                    break;
+                }
+            }
+            
+            require(insufficientFunds, "Sufficient funds available, use READY instead");
+
+            // Reset funding status since funds are insufficient
             project.fundedPoolCount = 0;
             for (uint256 i = 0; i < project.pools.length; i++) {
                 project.poolFunded[project.pools[i]] = false;

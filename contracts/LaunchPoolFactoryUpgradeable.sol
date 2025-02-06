@@ -326,6 +326,45 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         projects.updateProjectStatus(_projectId, _status);
     }
 
+    function pauseProject(uint256 _projectId) external {
+        require(msg.sender == projects[_projectId].owner, "Only project owner");
+        projects.updateProjectStatus(_projectId, ProjectStatus.PAUSED);
+    }
+
+    function resumeProject(uint256 _projectId) external {
+        require(msg.sender == projects[_projectId].owner, "Only project owner");
+        ProjectToken storage project = projects[_projectId];
+        require(project.status == ProjectStatus.PAUSED, "Project not paused");
+        
+        // Check if all pools have sufficient funds
+        bool sufficientFunds = true;
+        uint256 totalAllocated = 0;
+        
+        for (uint256 i = 0; i < project.pools.length; i++) {
+            LaunchPool currentPool = LaunchPool(payable(project.pools[i]));
+            uint256 poolRewardAmount = currentPool.poolRewardAmount();
+            totalAllocated += poolRewardAmount;
+            
+            if (IERC20(project.rewardToken).balanceOf(project.pools[i]) < poolRewardAmount) {
+                sufficientFunds = false;
+                break;
+            }
+        }
+        
+        if (sufficientFunds && totalAllocated == project.totalRewardAmount) {
+            // If funds are sufficient, directly resume to READY
+            projects.updateProjectStatus(_projectId, ProjectStatus.READY);
+        } else {
+            // If funds are insufficient, move to STAGING
+            projects.updateProjectStatus(_projectId, ProjectStatus.STAGING);
+        }
+    }
+
+    function delistProject(uint256 _projectId) external {
+        require(msg.sender == projects[_projectId].owner, "Only project owner");
+        projects.updateProjectStatus(_projectId, ProjectStatus.DELISTED);
+    }
+
     function updateProjectMetadata(
         uint256 _projectId,
         PoolMetadata calldata _metadata
@@ -373,7 +412,7 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         return projects.getProjectPools(_projectId);
     }
 
-    function stopProject(uint256 _projectId) external {
+    function endProject(uint256 _projectId) external {
         require(msg.sender == projects[_projectId].owner, "Not project owner");
         ProjectToken storage project = projects[_projectId];
         require(

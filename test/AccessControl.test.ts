@@ -330,12 +330,13 @@ describe("Access Control", function () {
 
     it("Should only allow project owner to stop project", async function () {
       await expect(
-        factory.connect(user1).stopProject(projectId)
+        factory.connect(user1).endProject(projectId)
       ).to.be.revertedWith("Not project owner");
 
-      await expect(
-        factory.connect(projectOwner).stopProject(projectId)
-      ).to.emit(factory, "ProjectStatusUpdated");
+      await expect(factory.connect(projectOwner).endProject(projectId)).to.emit(
+        factory,
+        "ProjectStatusUpdated"
+      );
     });
 
     it("Should only allow project owner to recover wrong tokens", async function () {
