@@ -75,8 +75,8 @@ library PoolLib {
                 stakedToken: address(currentPool.stakedToken()),
                 rewardToken: address(project.rewardToken),
                 rewardPerSecond: currentPool.rewardPerSecond(),
-                startTime: project.startTime,
-                endTime: project.endTime,
+                startTime: uint32(project.startTime),
+                endTime: uint32(project.endTime),
                 poolLimitPerUser: currentPool.poolLimitPerUser(),
                 minStakeAmount: currentPool.minStakeAmount()
             });
@@ -91,14 +91,14 @@ library PoolLib {
 
     function updatePool(
         uint256 accTokenPerShare,
-        uint256 lastRewardTime,
+        uint32 lastRewardTime,
         uint256 rewardPerSecond,
-        uint256 startTime,
-        uint256 endTime,
+        uint32 startTime,
+        uint32 endTime,
         uint256 precisionFactor,
         IERC20 /* stakedToken */,
         address payable caller
-    ) internal view returns (uint256 newAccTokenPerShare, uint256 newLastRewardTime) {
+    ) internal view returns (uint256 newAccTokenPerShare, uint32 newLastRewardTime) {
         newAccTokenPerShare = accTokenPerShare;
         newLastRewardTime = lastRewardTime;
 
@@ -123,12 +123,12 @@ library PoolLib {
 
         // If no staked tokens, only update last reward time
         if (stakedTokenSupply == 0) {
-            newLastRewardTime = block.timestamp > endTime ? endTime : block.timestamp;
+            newLastRewardTime = uint32(block.timestamp > endTime ? endTime : block.timestamp);
             return (newAccTokenPerShare, newLastRewardTime);
         }
 
         // Calculate end point (not exceeding end time)
-        uint256 endPoint = block.timestamp > endTime ? endTime : block.timestamp;
+        uint32 endPoint = uint32(block.timestamp > endTime ? endTime : block.timestamp);
         
         // If last reward time is greater than or equal to end point, no update needed
         if (lastRewardTime >= endPoint) {
@@ -143,16 +143,16 @@ library PoolLib {
             uint256 addition = rewardWithPrecision / stakedTokenSupply;
             newAccTokenPerShare = newAccTokenPerShare + addition;
         }
-        newLastRewardTime = endPoint;
+        newLastRewardTime = uint32(endPoint);
 
         return (newAccTokenPerShare, newLastRewardTime);
     }
 
     function getMultiplier(
-        uint256 _from,
-        uint256 _to,
-        uint256 startTime,
-        uint256 endTime
+        uint32 _from,
+        uint32 _to,
+        uint32 startTime,
+        uint32 endTime
     ) internal pure returns (uint256) {
         // If start time is after end time, no rewards
         if (_from >= endTime) {
@@ -165,8 +165,8 @@ library PoolLib {
         }
         
         // Adjust actual start and end times
-        uint256 actualFrom = _from < startTime ? startTime : _from;
-        uint256 actualTo = _to > endTime ? endTime : _to;
+        uint32 actualFrom = _from < startTime ? startTime : _from;
+        uint32 actualTo = _to > endTime ? endTime : _to;
         
         // If adjusted start time is after adjusted end time, no rewards
         if (actualFrom >= actualTo) {

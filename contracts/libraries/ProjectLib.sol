@@ -10,11 +10,11 @@ library ProjectLib {
     function createProject(
         mapping(uint256 => LaunchPoolFactoryUpgradeable.ProjectToken)
             storage projects,
-        uint256 nextProjectId,
+        uint32 nextProjectId,
         IERC20 _rewardToken,
         uint256 _totalRewardAmount,
-        uint256 _startTime,
-        uint256 _endTime,
+        uint32 _startTime,
+        uint32 _endTime,
         LaunchPoolFactoryUpgradeable.PoolMetadata calldata _metadata,
         address _projectOwner
     ) internal returns (uint256 projectId) {
@@ -32,6 +32,7 @@ library ProjectLib {
         project.totalRewardAmount = _totalRewardAmount;
         project.startTime = _startTime;
         project.endTime = _endTime;
+        project.fundedPoolCount = 0;
         project.metadata = _metadata;
         project.status = LaunchPoolFactoryUpgradeable.ProjectStatus.STAGING;
         project.owner = _projectOwner;
@@ -133,7 +134,7 @@ library ProjectLib {
             require(insufficientFunds, "Sufficient funds available, use READY instead");
 
             // Reset funding status since funds are insufficient
-            project.fundedPoolCount = 0;
+            project.fundedPoolCount = uint16(0);
             for (uint256 i = 0; i < project.pools.length; i++) {
                 project.poolFunded[project.pools[i]] = false;
             }

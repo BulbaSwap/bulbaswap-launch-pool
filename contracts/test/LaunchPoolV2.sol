@@ -20,7 +20,7 @@ contract LaunchPoolV2 is LaunchPool {
         uint256 _poolRewardAmount,
         uint256 _poolLimitPerUser,
         uint256 _minStakeAmount,
-        uint256 _projectId,
+        uint32 _projectId,
         uint256 _maxParticipants  // New parameter for V2
     ) external virtual {
         require(!isInitialized, "Already initialized");
@@ -28,7 +28,7 @@ contract LaunchPoolV2 is LaunchPool {
         
         factory = LaunchPoolFactoryUpgradeable(msg.sender);
         isInitialized = true;
-        projectId = _projectId;
+        projectId = uint32(_projectId);
         stakedToken = _stakedToken;
         poolRewardAmount = _poolRewardAmount;
         minStakeAmount = _minStakeAmount;
@@ -47,7 +47,7 @@ contract LaunchPoolV2 is LaunchPool {
         PRECISION_FACTOR = 10**(uint256(30) - decimalsRewardToken);
 
         // Set last reward time to project start time
-        (uint256 startTime,) = getProjectTimes();
+        (uint32 startTime,) = getProjectTimes();
         lastRewardTime = startTime;
 
         // V2 initialization

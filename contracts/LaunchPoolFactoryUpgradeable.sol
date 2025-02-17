@@ -41,19 +41,19 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
     struct ProjectToken {
         IERC20 rewardToken;
         uint256 totalRewardAmount;
-        uint256 startTime;
-        uint256 endTime;
+        uint32 startTime;
+        uint32 endTime;
         ProjectStatus status;
         address[] pools;
         mapping(address => bool) poolFunded;
-        uint256 fundedPoolCount;
+        uint16 fundedPoolCount;
         PoolMetadata metadata;
         address owner;
     }
 
     // Storage variables
     mapping(uint256 => ProjectToken) public projects;
-    uint256 public nextProjectId;
+    uint32 public nextProjectId;
     
     // LaunchPool implementation address
     address public launchPoolImplementation;
@@ -119,7 +119,7 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
             _poolRewardAmount,
             _poolLimitPerUser,
             _minStakeAmount,
-            _projectId
+            uint32(_projectId)
         );
 
         // Record pool version
@@ -134,8 +134,8 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
     struct ProjectInfo {
         IERC20 rewardToken;
         uint256 totalRewardAmount;
-        uint256 startTime;
-        uint256 endTime;
+        uint32 startTime;
+        uint32 endTime;
         ProjectStatus status;
         address[] pools;
         PoolMetadata metadata;
@@ -194,7 +194,7 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         return projects[_projectId].rewardToken;
     }
 
-    function _getProjectTimes(uint256 _projectId) internal view returns (uint256 startTime, uint256 endTime) {
+    function _getProjectTimes(uint256 _projectId) internal view returns (uint32 startTime, uint32 endTime) {
         ProjectToken storage project = projects[_projectId];
         return (project.startTime, project.endTime);
     }
@@ -227,7 +227,7 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         return _getProjectRewardToken(_projectId);
     }
 
-    function getProjectTimes(uint256 _projectId) external view returns (uint256 startTime, uint256 endTime) {
+    function getProjectTimes(uint32 _projectId) external view returns (uint32 startTime, uint32 endTime) {
         return _getProjectTimes(_projectId);
     }
 
@@ -261,8 +261,8 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
     function _createProject(
         IERC20 _rewardToken,
         uint256 _totalRewardAmount,
-        uint256 _startTime,
-        uint256 _endTime,
+        uint32 _startTime,
+        uint32 _endTime,
         PoolMetadata calldata _metadata,
         InitialPoolParams[] calldata _pools,
         address _projectOwner
@@ -304,8 +304,8 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
     function createProject(
         IERC20 _rewardToken,
         uint256 _totalRewardAmount,
-        uint256 _startTime,
-        uint256 _endTime,
+        uint32 _startTime,
+        uint32 _endTime,
         PoolMetadata calldata _metadata,
         InitialPoolParams[] calldata _pools,
         address _projectOwner
@@ -419,7 +419,7 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
             project.status == ProjectStatus.READY,
             "Project not in ready state"
         );
-        project.endTime = block.timestamp;
+        project.endTime = uint32(block.timestamp);
         emit Events.ProjectStatusUpdated(_projectId, project.status);
     }
 
@@ -438,8 +438,8 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         address stakedToken;
         address rewardToken;
         uint256 rewardPerSecond;
-        uint256 startTime;
-        uint256 endTime;
+        uint32 startTime;
+        uint32 endTime;
         uint256 poolLimitPerUser;
         uint256 minStakeAmount;
     }

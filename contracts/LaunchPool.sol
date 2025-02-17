@@ -19,7 +19,7 @@ contract LaunchPool is ReentrancyGuard {
     bytes32 internal constant READY = keccak256(bytes("READY"));
 
     // The ID of the project this pool belongs to
-    uint256 public projectId;
+    uint32 public projectId;
 
     // Whether a limit is set for users
     bool public hasUserLimit;
@@ -34,7 +34,7 @@ contract LaunchPool is ReentrancyGuard {
     uint256 public accTokenPerShare;
 
     // The time of the last pool update
-    uint256 public lastRewardTime;
+    uint32 public lastRewardTime;
 
     // The pool limit (0 if none)
     uint256 public poolLimitPerUser;
@@ -87,13 +87,13 @@ contract LaunchPool is ReentrancyGuard {
         uint256 _poolRewardAmount,
         uint256 _poolLimitPerUser,
         uint256 _minStakeAmount,
-        uint256 _projectId
+        uint32 _projectId
     ) external virtual {
         require(!isInitialized, "Already initialized");
         
         factory = LaunchPoolFactoryUpgradeable(msg.sender);
         isInitialized = true;
-        projectId = _projectId;
+        projectId = uint32(_projectId);
         stakedToken = _stakedToken;
         poolRewardAmount = _poolRewardAmount;
         minStakeAmount = _minStakeAmount;
@@ -109,7 +109,7 @@ contract LaunchPool is ReentrancyGuard {
         require(decimalsRewardToken < 36, "Must be inferior to 36");
         PRECISION_FACTOR = 10**(uint256(36) - decimalsRewardToken);
 
-        (uint256 startTime,) = getProjectTimes();
+        (uint32 startTime,) = getProjectTimes();
         lastRewardTime = startTime;
     }
 
@@ -121,7 +121,7 @@ contract LaunchPool is ReentrancyGuard {
         return factory.getProjectRewardToken(projectId);
     }
 
-    function getProjectTimes() public view returns (uint256 startTime, uint256 endTime) {
+    function getProjectTimes() public view returns (uint32 startTime, uint32 endTime) {
         return factory.getProjectTimes(projectId);
     }
 
@@ -284,7 +284,7 @@ contract LaunchPool is ReentrancyGuard {
     }
 
     function getTotalDistributedRewards() public view returns (uint256) {
-        (uint256 startTime, uint256 endTime) = getProjectTimes();
+        (uint32 startTime, uint32 endTime) = getProjectTimes();
         uint256 duration = endTime - startTime;
         return duration * rewardPerSecond;
     }
@@ -306,7 +306,7 @@ contract LaunchPool is ReentrancyGuard {
         UserInfo storage user = userInfo[_user];
         uint256 stakedTokenSupply = totalStaked;
         uint256 currentAccTokenPerShare = accTokenPerShare;
-        (uint256 startTime, uint256 endTime) = getProjectTimes();
+        (uint32 startTime, uint32 endTime) = getProjectTimes();
         
         if (block.timestamp <= lastRewardTime) {
             return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
@@ -324,13 +324,18 @@ contract LaunchPool is ReentrancyGuard {
             return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
         }
 
-        uint256 endPoint = block.timestamp > endTime ? endTime : block.timestamp;
+        uint32 endPoint = uint32(block.timestamp > endTime ? endTime : block.timestamp);
         
         if (lastRewardTime >= endPoint) {
             return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
         }
 
-        uint256 multiplier = PoolLib.getMultiplier(lastRewardTime, endPoint, startTime, endTime);
+        uint256 multiplier = PoolLib.getMultiplier(
+            uint32(lastRewardTime),
+            uint32(endPoint),
+            uint32(startTime),
+            uint32(endTime)
+        );
         uint256 reward = multiplier * rewardPerSecond;
         
         if (stakedTokenSupply > 0) {
@@ -342,9 +347,9 @@ contract LaunchPool is ReentrancyGuard {
     }
 
     function _updatePool() internal {
-        (uint256 startTime, uint256 endTime) = getProjectTimes();
+        (uint32 startTime, uint32 endTime) = getProjectTimes();
         
-        (uint256 newAccTokenPerShare, uint256 newLastRewardTime) = PoolLib.updatePool(
+        (uint256 newAccTokenPerShare, uint32 newLastRewardTime) = PoolLib.updatePool(
             accTokenPerShare,
             lastRewardTime,
             rewardPerSecond,

@@ -22,8 +22,8 @@ contract LaunchPoolFactoryV3 is LaunchPoolFactoryV2 {
     function _createProject(
         IERC20 _rewardToken,
         uint256 _totalRewardAmount,
-        uint256 _startTime,
-        uint256 _endTime,
+        uint32 _startTime,
+        uint32 _endTime,
         PoolMetadata calldata _metadata,
         InitialPoolParams[] calldata _initialPools,
         address _projectOwner
@@ -31,7 +31,7 @@ contract LaunchPoolFactoryV3 is LaunchPoolFactoryV2 {
         // Check if user has created a project recently
         if (ownerProjectCount[_projectOwner] > 0) {
             require(
-                _startTime >= block.timestamp + minProjectInterval,
+                _startTime >= uint32(block.timestamp) + uint32(minProjectInterval),
                 "Must wait before creating new project"
             );
         }

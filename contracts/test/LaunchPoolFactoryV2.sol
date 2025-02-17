@@ -43,8 +43,8 @@ contract LaunchPoolFactoryV2 is LaunchPoolFactoryUpgradeable {
     function _createProject(
         IERC20 _rewardToken,
         uint256 _totalRewardAmount,
-        uint256 _startTime,
-        uint256 _endTime,
+        uint32 _startTime,
+        uint32 _endTime,
         PoolMetadata calldata _metadata,
         InitialPoolParams[] calldata _initialPools,
         address _projectOwner
@@ -109,7 +109,7 @@ contract LaunchPoolFactoryV2 is LaunchPoolFactoryUpgradeable {
                 _poolRewardAmount,
                 _poolLimitPerUser,
                 _minStakeAmount,
-                _projectId,
+                uint32(_projectId),
                 100 // Default max participants for V2
             );
         } else {
@@ -119,7 +119,7 @@ contract LaunchPoolFactoryV2 is LaunchPoolFactoryUpgradeable {
                 _poolRewardAmount,
                 _poolLimitPerUser,
                 _minStakeAmount,
-                _projectId
+                uint32(_projectId)
             );
         }
 
