@@ -8,7 +8,7 @@ import "./Events.sol";
 
 library ProjectLib {
     function createProject(
-        mapping(uint256 => LaunchPoolFactoryUpgradeable.ProjectToken)
+        mapping(uint32 => LaunchPoolFactoryUpgradeable.ProjectToken)
             storage projects,
         uint32 nextProjectId,
         IERC20 _rewardToken,
@@ -17,7 +17,7 @@ library ProjectLib {
         uint32 _endTime,
         LaunchPoolFactoryUpgradeable.PoolMetadata calldata _metadata,
         address _projectOwner
-    ) internal returns (uint256 projectId) {
+    ) internal returns (uint32 projectId) {
         require(_rewardToken.totalSupply() >= 0, "Invalid reward token");
         require(_startTime > block.timestamp, "Start time must be future");
         require(_endTime > _startTime, "End time must be after start time");
@@ -52,9 +52,9 @@ library ProjectLib {
     }
 
     function updateProjectStatus(
-        mapping(uint256 => LaunchPoolFactoryUpgradeable.ProjectToken)
+        mapping(uint32 => LaunchPoolFactoryUpgradeable.ProjectToken)
             storage projects,
-        uint256 _projectId,
+        uint32 _projectId,
         LaunchPoolFactoryUpgradeable.ProjectStatus _status
     ) internal {
         LaunchPoolFactoryUpgradeable.ProjectToken storage project = projects[
@@ -145,9 +145,9 @@ library ProjectLib {
     }
 
     function updateProjectMetadata(
-        mapping(uint256 => LaunchPoolFactoryUpgradeable.ProjectToken)
+        mapping(uint32 => LaunchPoolFactoryUpgradeable.ProjectToken)
             storage projects,
-        uint256 _projectId,
+        uint32 _projectId,
         LaunchPoolFactoryUpgradeable.PoolMetadata calldata _metadata
     ) internal {
         LaunchPoolFactoryUpgradeable.ProjectToken storage project = projects[
@@ -162,9 +162,9 @@ library ProjectLib {
     }
 
     function transferProjectOwnership(
-        mapping(uint256 => LaunchPoolFactoryUpgradeable.ProjectToken)
+        mapping(uint32 => LaunchPoolFactoryUpgradeable.ProjectToken)
             storage projects,
-        uint256 _projectId,
+        uint32 _projectId,
         address _newOwner
     ) internal {
         LaunchPoolFactoryUpgradeable.ProjectToken storage project = projects[

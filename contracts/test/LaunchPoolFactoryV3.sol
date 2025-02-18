@@ -27,7 +27,7 @@ contract LaunchPoolFactoryV3 is LaunchPoolFactoryV2 {
         PoolMetadata calldata _metadata,
         InitialPoolParams[] calldata _initialPools,
         address _projectOwner
-    ) internal virtual override returns (uint256) {
+    ) internal virtual override returns (uint32) {
         // Check if user has created a project recently
         if (ownerProjectCount[_projectOwner] > 0) {
             require(

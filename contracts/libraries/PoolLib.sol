@@ -13,8 +13,8 @@ library PoolLib {
 
 
     function fundPool(
-        mapping(uint256 => LaunchPoolFactoryUpgradeable.ProjectToken) storage projects,
-        uint256 _projectId,
+        mapping(uint32 => LaunchPoolFactoryUpgradeable.ProjectToken) storage projects,
+        uint32 _projectId,
         address payable _poolAddress,
         uint256 _amount
     ) internal {
@@ -48,8 +48,8 @@ library PoolLib {
     }
 
     function calculateRewardPerSecond(
-        mapping(uint256 => LaunchPoolFactoryUpgradeable.ProjectToken) storage projects,
-        uint256 _projectId,
+        mapping(uint32 => LaunchPoolFactoryUpgradeable.ProjectToken) storage projects,
+        uint32 _projectId,
         uint256 _poolRewardAmount
     ) internal view returns (uint256) {
         LaunchPoolFactoryUpgradeable.ProjectToken storage project = projects[_projectId];
@@ -58,8 +58,8 @@ library PoolLib {
     }
 
     function getProjectPools(
-        mapping(uint256 => LaunchPoolFactoryUpgradeable.ProjectToken) storage projects,
-        uint256 _projectId
+        mapping(uint32 => LaunchPoolFactoryUpgradeable.ProjectToken) storage projects,
+        uint32 _projectId
     ) internal view returns (LaunchPoolFactoryUpgradeable.PoolInfo[] memory) {
         LaunchPoolFactoryUpgradeable.ProjectToken storage project = projects[_projectId];
         address payable[] memory poolAddresses = new address payable[](project.pools.length);

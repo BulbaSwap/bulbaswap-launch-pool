@@ -30,7 +30,7 @@ contract LaunchPoolFactoryV2 is LaunchPoolFactoryUpgradeable {
         // Initialize project counts for existing projects
         uint256 projectCount = nextProjectId;
         for (uint256 i = 0; i < projectCount; i++) {
-            address projectOwner = super.getProjectOwner(i);
+            address projectOwner = super.getProjectOwner(uint32(i));
             if (ownerProjectCount[projectOwner] == 0) {
                 ownerProjectCount[projectOwner] = 1;
             } else {
@@ -48,13 +48,13 @@ contract LaunchPoolFactoryV2 is LaunchPoolFactoryUpgradeable {
         PoolMetadata calldata _metadata,
         InitialPoolParams[] calldata _initialPools,
         address _projectOwner
-    ) internal virtual override returns (uint256) {
+    ) internal virtual override returns (uint32) {
         require(
             ownerProjectCount[_projectOwner] < maxProjectsPerOwner,
             "Too many projects"
         );
         
-        uint256 projectId = super._createProject(
+        uint32 projectId = super._createProject(
             _rewardToken,
             _totalRewardAmount,
             _startTime,
@@ -84,7 +84,7 @@ contract LaunchPoolFactoryV2 is LaunchPoolFactoryUpgradeable {
     }
 
     function _deployPool(
-        uint256 _projectId,
+        uint32 _projectId,
         IERC20 _stakedToken,
         uint256 _poolRewardAmount,
         uint256 _poolLimitPerUser,

@@ -69,7 +69,7 @@ contract LaunchPool is ReentrancyGuard {
     event AdminTokenRecovery(address tokenRecovered, uint256 amount);
     event Deposit(address indexed user, uint256 amount);
     event EmergencyWithdraw(address indexed user, uint256 amount);
-    event NewStartAndEndTimes(uint256 startTime, uint256 endTime);
+    event NewStartAndEndTimes(uint32 startTime, uint32 endTime);
     event NewPoolLimit(uint256 poolLimitPerUser);
     event NewMinStakeAmount(uint256 minStakeAmount);
     event Withdraw(address indexed user, uint256 amount);
