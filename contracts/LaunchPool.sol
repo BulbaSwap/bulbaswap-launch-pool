@@ -129,6 +129,8 @@ contract LaunchPool is ReentrancyGuard {
 
     function deposit(uint256 _amount) external virtual payable nonReentrant {
         UserInfo storage user = userInfo[msg.sender];
+        uint256 currentAmount = user.amount;
+        uint256 currentAccTokenPerShare = accTokenPerShare;
 
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
         require(statusHash == ACTIVE || statusHash == READY, "Pool must be active or ready");
@@ -136,21 +138,22 @@ contract LaunchPool is ReentrancyGuard {
         if (_amount > 0) {
             require(_amount >= minStakeAmount, "Amount below minimum stake");
             if (hasUserLimit) {
-                require(_amount + user.amount <= poolLimitPerUser, "User amount above limit");
+                require(_amount + currentAmount <= poolLimitPerUser, "User amount above limit");
             }
         }
 
         _updatePool();
+        currentAccTokenPerShare = accTokenPerShare;
 
-        if (user.amount > 0) {
-            uint256 pending = user.amount * accTokenPerShare / PRECISION_FACTOR - user.rewardDebt;
+        if (currentAmount > 0) {
+            uint256 pending = currentAmount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt;
             if (pending > 0) {
                 user.pendingRewards = user.pendingRewards + pending;
             }
         }
 
         if (_amount > 0) {
-            user.amount = user.amount + _amount;
+            currentAmount = currentAmount + _amount;
             totalStaked += _amount;
             if (address(stakedToken) == ETH) {
                 require(msg.value == _amount, "Invalid ETH amount");
@@ -159,13 +162,17 @@ contract LaunchPool is ReentrancyGuard {
             }
         }
 
-        user.rewardDebt = user.amount * accTokenPerShare / PRECISION_FACTOR;
+        user.amount = currentAmount;
+        user.rewardDebt = currentAmount * currentAccTokenPerShare / PRECISION_FACTOR;
 
         emit Deposit(msg.sender, _amount);
     }
 
     function withdraw(uint256 _amount) external nonReentrant {
         UserInfo storage user = userInfo[msg.sender];
+        uint256 currentAmount = user.amount;
+        uint256 currentAccTokenPerShare = accTokenPerShare;
+
         bytes32 statusHash = keccak256(bytes(factory.getProjectStatus(projectId)));
         require(
             statusHash == ACTIVE || 
@@ -175,17 +182,18 @@ contract LaunchPool is ReentrancyGuard {
             statusHash == READY,
             "Pool must be active, ended, paused, delisted or ready"
         );
-        require(user.amount >= _amount, "Amount to withdraw too high");
+        require(currentAmount >= _amount, "Amount to withdraw too high");
 
         _updatePool();
+        currentAccTokenPerShare = accTokenPerShare;
 
-        uint256 pending = user.amount * accTokenPerShare / PRECISION_FACTOR - user.rewardDebt;
+        uint256 pending = currentAmount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt;
         if (pending > 0) {
             user.pendingRewards = user.pendingRewards + pending;
         }
 
         if (_amount > 0) {
-            user.amount = user.amount - _amount;
+            currentAmount = currentAmount - _amount;
             totalStaked -= _amount;
             if (address(stakedToken) == ETH) {
                 (bool success, ) = msg.sender.call{value: _amount}("");
@@ -195,7 +203,8 @@ contract LaunchPool is ReentrancyGuard {
             }
         }
 
-        user.rewardDebt = user.amount * accTokenPerShare / PRECISION_FACTOR;
+        user.amount = currentAmount;
+        user.rewardDebt = currentAmount * currentAccTokenPerShare / PRECISION_FACTOR;
 
         emit Withdraw(msg.sender, _amount);
     }
@@ -205,15 +214,18 @@ contract LaunchPool is ReentrancyGuard {
         require(statusHash == ENDED, "Pool not ended");
         
         UserInfo storage user = userInfo[msg.sender];
+        uint256 currentAmount = user.amount;
+        uint256 currentAccTokenPerShare = accTokenPerShare;
 
         _updatePool();
+        currentAccTokenPerShare = accTokenPerShare;
 
-        uint256 pending = user.amount * accTokenPerShare / PRECISION_FACTOR - user.rewardDebt;
+        uint256 pending = currentAmount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt;
         uint256 totalPending = pending + user.pendingRewards;
         require(totalPending > 0, "No rewards to claim");
 
         user.pendingRewards = 0;
-        user.rewardDebt = user.amount * accTokenPerShare / PRECISION_FACTOR;
+        user.rewardDebt = currentAmount * currentAccTokenPerShare / PRECISION_FACTOR;
 
         rewardToken().safeTransfer(msg.sender, totalPending);
 

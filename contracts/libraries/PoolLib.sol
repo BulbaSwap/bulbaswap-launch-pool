@@ -62,16 +62,14 @@ library PoolLib {
         uint32 _projectId
     ) internal view returns (LaunchPoolFactoryUpgradeable.PoolInfo[] memory) {
         LaunchPoolFactoryUpgradeable.ProjectToken storage project = projects[_projectId];
-        address payable[] memory poolAddresses = new address payable[](project.pools.length);
-        for (uint256 i = 0; i < project.pools.length; i++) {
-            poolAddresses[i] = payable(project.pools[i]);
-        }
-        LaunchPoolFactoryUpgradeable.PoolInfo[] memory poolInfos = new LaunchPoolFactoryUpgradeable.PoolInfo[](poolAddresses.length);
+        uint256 poolsLength = project.pools.length;
         
-        for (uint256 i = 0; i < poolAddresses.length; i++) {
-            LaunchPool currentPool = LaunchPool(poolAddresses[i]);
+        LaunchPoolFactoryUpgradeable.PoolInfo[] memory poolInfos = new LaunchPoolFactoryUpgradeable.PoolInfo[](poolsLength);
+        
+        for (uint256 i = 0; i < poolsLength; i++) {
+            LaunchPool currentPool = LaunchPool(payable(project.pools[i]));
             poolInfos[i] = LaunchPoolFactoryUpgradeable.PoolInfo({
-                poolAddress: poolAddresses[i],
+                poolAddress: payable(project.pools[i]),
                 stakedToken: address(currentPool.stakedToken()),
                 rewardToken: address(project.rewardToken),
                 rewardPerSecond: currentPool.rewardPerSecond(),
