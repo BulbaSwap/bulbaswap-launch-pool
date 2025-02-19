@@ -58,6 +58,9 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
     // LaunchPool implementation address
     address public launchPoolImplementation;
 
+    // Counter for unique pool deployment
+    uint256 private _poolNonce;
+
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -105,7 +108,7 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         }
 
         bytes32 salt = keccak256(
-            abi.encodePacked(_projectId, _stakedToken, project.rewardToken, project.startTime)
+            abi.encodePacked(_projectId, _stakedToken, project.rewardToken, project.startTime, _poolNonce++)
         );
         
         require(launchPoolImplementation != address(0), "Implementation not set");

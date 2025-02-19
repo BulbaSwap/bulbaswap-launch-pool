@@ -366,6 +366,111 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
       expect(await factory.getProjectStatus(projectId)).to.equal("DELISTED");
     });
 
+    it("Should only reset insufficient funded pools when moving from PAUSED to STAGING", async function () {
+      const now = await time.latest();
+      const startTime = now + 100;
+      const endTime = startTime + 3600;
+
+      const metadata = {
+        projectName: "Test Project",
+        website: "https://test.com",
+        logo: "https://test.com/logo.png",
+        discord: "https://discord.gg/test",
+        twitter: "https://twitter.com/test",
+        telegram: "https://t.me/test",
+        tokenInfo: "Test Token Info",
+      };
+
+      // Create project without initial pools
+      await factory.createProject(
+        rewardToken,
+        ethers.parseEther("360"),
+        startTime,
+        endTime,
+        metadata,
+        emptyPools,
+        projectOwner.address
+      );
+
+      const projectId = (await factory.nextProjectId()) - 1n;
+
+      // Add first pool with 300 tokens reward
+      await factory.connect(projectOwner).addPoolToProject(
+        projectId,
+        testToken,
+        ethers.parseEther("300"), // Main pool with 300 tokens
+        ethers.parseEther("100"),
+        ethers.parseEther("10")
+      );
+
+      // Add second pool with 60 tokens reward
+      await factory.connect(projectOwner).addPoolToProject(
+        projectId,
+        testToken,
+        ethers.parseEther("60"), // Small pool with 60 tokens
+        ethers.parseEther("100"),
+        ethers.parseEther("10")
+      );
+
+      const poolInfos = await factory.getProjectPools(projectId);
+      expect(poolInfos.length).to.equal(2);
+
+      // Fund both pools (300 + 60)
+      await rewardToken.mint(projectOwner.address, ethers.parseEther("360")); // Total project reward
+      await rewardToken
+        .connect(projectOwner)
+        .approve(await factory.getAddress(), ethers.parseEther("360"));
+
+      // Fund first pool with 300 tokens
+      await factory
+        .connect(projectOwner)
+        .fundPool(
+          projectId,
+          poolInfos[0].poolAddress,
+          ethers.parseEther("300")
+        );
+      // Fund second pool with 60 tokens
+      await factory
+        .connect(projectOwner)
+        .fundPool(projectId, poolInfos[1].poolAddress, ethers.parseEther("60"));
+
+      // Move to READY state
+      expect(await factory.getProjectStatus(projectId)).to.equal("READY");
+
+      // Pause project
+      await factory.connect(projectOwner).updateProjectStatus(projectId, 3); // PAUSED
+      expect(await factory.getProjectStatus(projectId)).to.equal("PAUSED");
+
+      // Remove funds from second pool only
+      const LaunchPool = await ethers.getContractFactory("LaunchPool");
+      const pool2 = LaunchPool.attach(poolInfos[1].poolAddress) as LaunchPool;
+      await pool2
+        .connect(projectOwner)
+        .emergencyRewardWithdraw(ethers.parseEther("60"));
+
+      // Resume project (should go to STAGING since pool2 has insufficient funds)
+      await factory.connect(projectOwner).resumeProject(projectId);
+      expect(await factory.getProjectStatus(projectId)).to.equal("STAGING");
+
+      // Get project info to check pool funding status
+      const project = await factory.getProject(projectId);
+
+      // First pool should still be marked as funded
+      const pool1Info = project.poolInfos[0];
+      const pool2Info = project.poolInfos[1];
+
+      // Verify pool statuses through their balances
+      const pool1Balance = await rewardToken.balanceOf(
+        poolInfos[0].poolAddress
+      );
+      const pool2Balance = await rewardToken.balanceOf(
+        poolInfos[1].poolAddress
+      );
+
+      expect(pool1Balance).to.equal(ethers.parseEther("300")); // First pool should still have full balance
+      expect(pool2Balance).to.equal(0n); // Second pool should have no balance
+    });
+
     it("Should not allow invalid status transitions", async function () {
       // Cannot move to READY without funding
       await expect(

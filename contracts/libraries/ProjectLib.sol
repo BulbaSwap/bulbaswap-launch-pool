@@ -133,10 +133,15 @@ library ProjectLib {
             
             require(insufficientFunds, "Sufficient funds available, use READY instead");
 
-            // Reset funding status since funds are insufficient
-            project.fundedPoolCount = uint16(0);
+            // Only reset pools with insufficient funds
             for (uint256 i = 0; i < project.pools.length; i++) {
-                project.poolFunded[project.pools[i]] = false;
+                LaunchPool currentPool = LaunchPool(payable(project.pools[i]));
+                if (IERC20(project.rewardToken).balanceOf(project.pools[i]) < currentPool.poolRewardAmount()) {
+                    if (project.poolFunded[project.pools[i]]) {
+                        project.poolFunded[project.pools[i]] = false;
+                        project.fundedPoolCount--;
+                    }
+                }
             }
         }
 
