@@ -49,6 +49,7 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         uint16 fundedPoolCount;
         PoolMetadata metadata;
         address owner;
+        address pendingOwner;
     }
 
     // Storage variables
@@ -354,9 +355,17 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         projects.updateProjectMetadata(_projectId, _metadata);
     }
 
-    function transferProjectOwnership(uint32 _projectId, address _newOwner) external {
+    function transferProjectOwnershipRequest(uint32 _projectId, address _newOwner) external {
         require(msg.sender == projects[_projectId].owner, "Only project owner");
-        projects.transferProjectOwnership(_projectId, _newOwner);
+        projects.transferProjectOwnershipRequest(_projectId, _newOwner);
+    }
+
+    function acceptProjectOwnership(uint32 _projectId) external {
+        projects.acceptProjectOwnership(_projectId);
+    }
+
+    function cancelProjectOwnershipTransfer(uint32 _projectId) external {
+        projects.cancelProjectOwnershipTransfer(_projectId);
     }
 
     function getProjectOwner(uint32 _projectId) public virtual view returns (address) {

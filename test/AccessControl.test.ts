@@ -224,24 +224,66 @@ describe("Access Control", function () {
       ).to.emit(factory, "PoolMetadataUpdated");
     });
 
-    it("Should allow project ownership transfer", async function () {
+    it("Should handle project ownership transfer correctly", async function () {
       const projectId = (await factory.nextProjectId()) - 1n;
 
+      // Non-owner cannot initiate transfer
       await expect(
         factory
           .connect(user1)
-          .transferProjectOwnership(projectId, user1.address)
+          .transferProjectOwnershipRequest(projectId, user1.address)
       ).to.be.revertedWith("Only project owner");
 
+      // Cannot transfer to zero address
       await expect(
         factory
           .connect(projectOwner)
-          .transferProjectOwnership(projectId, user1.address)
+          .transferProjectOwnershipRequest(projectId, ethers.ZeroAddress)
+      ).to.be.revertedWith("New owner is zero address");
+
+      // Cannot transfer to current owner
+      await expect(
+        factory
+          .connect(projectOwner)
+          .transferProjectOwnershipRequest(projectId, projectOwner.address)
+      ).to.be.revertedWith("New owner is current owner");
+
+      // Start transfer to user1
+      await expect(
+        factory
+          .connect(projectOwner)
+          .transferProjectOwnershipRequest(projectId, user1.address)
       )
+        .to.emit(factory, "ProjectOwnershipTransferStarted")
+        .withArgs(projectId, projectOwner.address, user1.address);
+
+      // Only pending owner can accept
+      await expect(
+        factory.connect(projectOwner).acceptProjectOwnership(projectId)
+      ).to.be.revertedWith("Only pending owner");
+
+      // Current owner can cancel transfer
+      await expect(
+        factory.connect(projectOwner).cancelProjectOwnershipTransfer(projectId)
+      )
+        .to.emit(factory, "ProjectOwnershipTransferCanceled")
+        .withArgs(projectId, projectOwner.address, user1.address);
+
+      // After cancellation, accepting should fail
+      await expect(
+        factory.connect(user1).acceptProjectOwnership(projectId)
+      ).to.be.revertedWith("No pending transfer");
+
+      // Start transfer again
+      await factory
+        .connect(projectOwner)
+        .transferProjectOwnershipRequest(projectId, user1.address);
+
+      // Pending owner can accept transfer
+      await expect(factory.connect(user1).acceptProjectOwnership(projectId))
         .to.emit(factory, "ProjectOwnershipTransferred")
         .withArgs(projectId, projectOwner.address, user1.address);
 
-      // After transfer, old owner should not be able to update metadata
       const newMetadata = {
         projectName: "Updated Project",
         website: "https://updated.com",
@@ -252,6 +294,7 @@ describe("Access Control", function () {
         tokenInfo: "Updated Token Info",
       };
 
+      // After transfer, old owner should not be able to update metadata
       await expect(
         factory
           .connect(projectOwner)
@@ -404,10 +447,13 @@ describe("Access Control", function () {
     });
 
     it("Should respect project ownership transfer for pool management", async function () {
-      // Transfer project ownership to user1
+      // Request transfer project ownership to user1
       await factory
         .connect(projectOwner)
-        .transferProjectOwnership(projectId, user1.address);
+        .transferProjectOwnershipRequest(projectId, user1.address);
+
+      // Accept ownership transfer
+      await factory.connect(user1).acceptProjectOwnership(projectId);
 
       // Old owner should not be able to update parameters
       await expect(

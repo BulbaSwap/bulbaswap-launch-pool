@@ -360,12 +360,22 @@ describe("LaunchPool", function () {
     });
 
     it("Should respect project ownership transfer", async function () {
-      // Transfer project ownership to user1
+      // Request transfer project ownership to user1
       await factory
         .connect(projectOwner)
-        .transferProjectOwnership(projectId, user1.address);
+        .transferProjectOwnershipRequest(projectId, user1.address);
 
-      // Old owner should not be able to update parameters
+      // Old owner should still be able to update parameters before transfer is accepted
+      await expect(
+        launchPool
+          .connect(projectOwner)
+          .updateMinStakeAmount(ethers.parseEther("20"))
+      ).to.not.be.reverted;
+
+      // Accept ownership transfer
+      await factory.connect(user1).acceptProjectOwnership(projectId);
+
+      // Old owner should not be able to update parameters after transfer
       await expect(
         launchPool
           .connect(projectOwner)
@@ -376,6 +386,30 @@ describe("LaunchPool", function () {
       await expect(
         launchPool.connect(user1).updateMinStakeAmount(ethers.parseEther("20"))
       ).to.not.be.reverted;
+    });
+
+    it("Should handle project ownership transfer cancellation", async function () {
+      // Request transfer project ownership to user1
+      await factory
+        .connect(projectOwner)
+        .transferProjectOwnershipRequest(projectId, user1.address);
+
+      // Cancel transfer
+      await factory
+        .connect(projectOwner)
+        .cancelProjectOwnershipTransfer(projectId);
+
+      // Original owner should still be able to update parameters
+      await expect(
+        launchPool
+          .connect(projectOwner)
+          .updateMinStakeAmount(ethers.parseEther("20"))
+      ).to.not.be.reverted;
+
+      // User1 should not be able to accept cancelled transfer
+      await expect(
+        factory.connect(user1).acceptProjectOwnership(projectId)
+      ).to.be.revertedWith("No pending transfer");
     });
   });
 

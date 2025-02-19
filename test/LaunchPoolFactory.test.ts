@@ -507,19 +507,17 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
       expect(project.metadata.tokenInfo).to.equal(newMetadata.tokenInfo);
     });
 
-    it("Should transfer project ownership", async function () {
-      // Transfer ownership to user
+    it("Should handle project ownership transfer correctly", async function () {
+      // Request transfer ownership to user
       await expect(
         factory
           .connect(projectOwner)
-          .transferProjectOwnership(projectId, user.address)
+          .transferProjectOwnershipRequest(projectId, user.address)
       )
-        .to.emit(factory, "ProjectOwnershipTransferred")
+        .to.emit(factory, "ProjectOwnershipTransferStarted")
         .withArgs(projectId, projectOwner.address, user.address);
 
-      expect(await factory.getProjectOwner(projectId)).to.equal(user.address);
-
-      // Old owner should not be able to update metadata
+      // Old owner should still be able to update metadata before transfer is accepted
       const newMetadata = {
         projectName: "Updated Project",
         website: "https://updated.com",
@@ -534,6 +532,20 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
         factory
           .connect(projectOwner)
           .updateProjectMetadata(projectId, newMetadata)
+      ).to.not.be.reverted;
+
+      // Accept ownership transfer
+      await expect(factory.connect(user).acceptProjectOwnership(projectId))
+        .to.emit(factory, "ProjectOwnershipTransferred")
+        .withArgs(projectId, projectOwner.address, user.address);
+
+      expect(await factory.getProjectOwner(projectId)).to.equal(user.address);
+
+      // Old owner should not be able to update metadata after transfer
+      await expect(
+        factory
+          .connect(projectOwner)
+          .updateProjectMetadata(projectId, newMetadata)
       ).to.be.revertedWith("Only project owner");
 
       // New owner should be able to update metadata
@@ -542,10 +554,73 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
       ).to.not.be.reverted;
     });
 
-    it("Should not allow non-owner to transfer project ownership", async function () {
+    it("Should handle project ownership transfer cancellation", async function () {
+      // Request transfer ownership to user
+      await factory
+        .connect(projectOwner)
+        .transferProjectOwnershipRequest(projectId, user.address);
+
+      // Cancel transfer
       await expect(
-        factory.connect(user).transferProjectOwnership(projectId, user.address)
+        factory.connect(projectOwner).cancelProjectOwnershipTransfer(projectId)
+      )
+        .to.emit(factory, "ProjectOwnershipTransferCanceled")
+        .withArgs(projectId, projectOwner.address, user.address);
+
+      // Original owner should still be able to update metadata
+      const newMetadata = {
+        projectName: "Updated Project",
+        website: "https://updated.com",
+        logo: "https://updated.com/logo.png",
+        discord: "https://discord.gg/updated",
+        twitter: "https://twitter.com/updated",
+        telegram: "https://t.me/updated",
+        tokenInfo: "Updated Token Info",
+      };
+
+      await expect(
+        factory
+          .connect(projectOwner)
+          .updateProjectMetadata(projectId, newMetadata)
+      ).to.not.be.reverted;
+
+      // User should not be able to accept cancelled transfer
+      await expect(
+        factory.connect(user).acceptProjectOwnership(projectId)
+      ).to.be.revertedWith("No pending transfer");
+    });
+
+    it("Should validate project ownership transfer parameters", async function () {
+      // Cannot transfer to zero address
+      await expect(
+        factory
+          .connect(projectOwner)
+          .transferProjectOwnershipRequest(projectId, ethers.ZeroAddress)
+      ).to.be.revertedWith("New owner is zero address");
+
+      // Cannot transfer to current owner
+      await expect(
+        factory
+          .connect(projectOwner)
+          .transferProjectOwnershipRequest(projectId, projectOwner.address)
+      ).to.be.revertedWith("New owner is current owner");
+
+      // Non-owner cannot initiate transfer
+      await expect(
+        factory
+          .connect(user)
+          .transferProjectOwnershipRequest(projectId, user.address)
       ).to.be.revertedWith("Only project owner");
+
+      // Cannot cancel when no transfer is pending
+      await expect(
+        factory.connect(projectOwner).cancelProjectOwnershipTransfer(projectId)
+      ).to.be.revertedWith("No pending transfer");
+
+      // Cannot accept when no transfer is pending
+      await expect(
+        factory.connect(user).acceptProjectOwnership(projectId)
+      ).to.be.revertedWith("No pending transfer");
     });
   });
 
@@ -711,10 +786,13 @@ describe("LaunchPoolFactoryUpgradeable (Business Logic)", function () {
           .updatePoolLimitPerUser(true, ethers.parseEther("200"))
       ).to.be.revertedWith("Not project owner");
 
-      // Transfer project ownership
+      // Request transfer project ownership
       await factory
         .connect(projectOwner)
-        .transferProjectOwnership(projectId, user.address);
+        .transferProjectOwnershipRequest(projectId, user.address);
+
+      // Accept ownership transfer
+      await factory.connect(user).acceptProjectOwnership(projectId);
 
       // New owner should be able to update pool limit
       await expect(

@@ -10,6 +10,8 @@ library Events {
     event PoolMetadataUpdated(uint32 indexed projectId, LaunchPoolFactoryUpgradeable.PoolMetadata metadata);
     event PoolFunded(uint32 indexed projectId, address indexed pool);
     event ProjectOwnershipTransferred(uint32 indexed projectId, address indexed previousOwner, address indexed newOwner);
+    event ProjectOwnershipTransferStarted(uint32 indexed projectId, address indexed previousOwner, address indexed pendingOwner);
+    event ProjectOwnershipTransferCanceled(uint32 indexed projectId, address indexed currentOwner, address indexed pendingOwner);
     event FactoryUpgraded(address indexed implementation);
     event RemainingRewardsWithdrawn(address indexed owner, uint256 amount);
 }

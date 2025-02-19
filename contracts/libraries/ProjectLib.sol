@@ -166,7 +166,7 @@ library ProjectLib {
         emit Events.PoolMetadataUpdated(_projectId, _metadata);
     }
 
-    function transferProjectOwnership(
+    function _transferProjectOwnership(
         mapping(uint32 => LaunchPoolFactoryUpgradeable.ProjectToken)
             storage projects,
         uint32 _projectId,
@@ -179,10 +179,65 @@ library ProjectLib {
 
         address oldOwner = project.owner;
         project.owner = _newOwner;
+        project.pendingOwner = address(0);
         emit Events.ProjectOwnershipTransferred(
             _projectId,
             oldOwner,
             _newOwner
+        );
+    }
+
+    function transferProjectOwnershipRequest(
+        mapping(uint32 => LaunchPoolFactoryUpgradeable.ProjectToken)
+            storage projects,
+        uint32 _projectId,
+        address _newOwner
+    ) internal {
+        LaunchPoolFactoryUpgradeable.ProjectToken storage project = projects[
+            _projectId
+        ];
+        require(_newOwner != address(0), "New owner is zero address");
+        require(_newOwner != project.owner, "New owner is current owner");
+
+        project.pendingOwner = _newOwner;
+        emit Events.ProjectOwnershipTransferStarted(
+            _projectId,
+            project.owner,
+            _newOwner
+        );
+    }
+
+    function acceptProjectOwnership(
+        mapping(uint32 => LaunchPoolFactoryUpgradeable.ProjectToken)
+            storage projects,
+        uint32 _projectId
+    ) internal {
+        LaunchPoolFactoryUpgradeable.ProjectToken storage project = projects[
+            _projectId
+        ];
+        require(project.pendingOwner != address(0), "No pending transfer");
+        require(msg.sender == project.pendingOwner, "Only pending owner");
+        
+        _transferProjectOwnership(projects, _projectId, project.pendingOwner);
+    }
+
+    function cancelProjectOwnershipTransfer(
+        mapping(uint32 => LaunchPoolFactoryUpgradeable.ProjectToken)
+            storage projects,
+        uint32 _projectId
+    ) internal {
+        LaunchPoolFactoryUpgradeable.ProjectToken storage project = projects[
+            _projectId
+        ];
+        require(msg.sender == project.owner, "Only current owner");
+        require(project.pendingOwner != address(0), "No pending transfer");
+
+        address oldPendingOwner = project.pendingOwner;
+        project.pendingOwner = address(0);
+        emit Events.ProjectOwnershipTransferCanceled(
+            _projectId,
+            project.owner,
+            oldPendingOwner
         );
     }
 }
