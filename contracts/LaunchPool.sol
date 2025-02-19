@@ -54,7 +54,7 @@ contract LaunchPool is ReentrancyGuard {
     // The staked token
     IERC20 public stakedToken;
 
-    // Total staked amount (used for ETH pools)
+    // Total staked amount for all pools (ETH and ERC20)
     uint256 public totalStaked;
 
     // Info of each user that stakes tokens (stakedToken)
@@ -305,45 +305,20 @@ contract LaunchPool is ReentrancyGuard {
     function pendingReward(address _user) external view returns (uint256) {
         UserInfo storage user = userInfo[_user];
         uint256 stakedTokenSupply = totalStaked;
-        uint256 currentAccTokenPerShare = accTokenPerShare;
         (uint32 startTime, uint32 endTime) = getProjectTimes();
         
-        if (block.timestamp <= lastRewardTime) {
-            return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
-        }
-
-        if (block.timestamp < startTime) {
-            return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
-        }
-
-        if (lastRewardTime >= endTime) {
-            return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
-        }
-
-        if (stakedTokenSupply == 0) {
-            return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
-        }
-
-        uint32 endPoint = uint32(block.timestamp > endTime ? endTime : block.timestamp);
-        
-        if (lastRewardTime >= endPoint) {
-            return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
-        }
-
-        uint256 multiplier = PoolLib.getMultiplier(
-            uint32(lastRewardTime),
-            uint32(endPoint),
-            uint32(startTime),
-            uint32(endTime)
+        return PoolLib.calculatePendingRewards(
+            accTokenPerShare,
+            rewardPerSecond,
+            PRECISION_FACTOR,
+            stakedTokenSupply,
+            lastRewardTime,
+            startTime,
+            endTime,
+            user.amount,
+            user.rewardDebt,
+            user.pendingRewards
         );
-        uint256 reward = multiplier * rewardPerSecond;
-        
-        if (stakedTokenSupply > 0) {
-            uint256 addition = reward * PRECISION_FACTOR / stakedTokenSupply;
-            currentAccTokenPerShare = currentAccTokenPerShare + addition;
-        }
-        
-        return user.amount * currentAccTokenPerShare / PRECISION_FACTOR - user.rewardDebt + user.pendingRewards;
     }
 
     function _updatePool() internal {

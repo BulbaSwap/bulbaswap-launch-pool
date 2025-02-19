@@ -89,6 +89,71 @@ library PoolLib {
     // ETH address constant
     address constant internal ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
+    struct RewardCalculationResult {
+        uint256 newAccTokenPerShare;
+        uint32 newLastRewardTime;
+        uint256 pendingReward;
+    }
+
+    function calculateRewards(
+        uint256 accTokenPerShare,
+        uint32 lastRewardTime,
+        uint256 rewardPerSecond,
+        uint32 startTime,
+        uint32 endTime,
+        uint256 precisionFactor,
+        uint256 stakedTokenSupply,
+        uint256 userAmount,
+        uint256 userRewardDebt,
+        uint256 userPendingRewards
+    ) internal view returns (RewardCalculationResult memory result) {
+        result.newAccTokenPerShare = accTokenPerShare;
+        result.newLastRewardTime = lastRewardTime;
+        result.pendingReward = userAmount * accTokenPerShare / precisionFactor - userRewardDebt + userPendingRewards;
+
+        // If current time is less than or equal to last reward time, no update needed
+        if (block.timestamp <= lastRewardTime) {
+            return result;
+        }
+
+        // If current time is less than start time, update last reward time to start time
+        if (block.timestamp < startTime) {
+            result.newLastRewardTime = startTime;
+            return result;
+        }
+
+        // If last reward time is greater than or equal to end time, no update needed
+        if (lastRewardTime >= endTime) {
+            return result;
+        }
+
+        // If no staked tokens, only update last reward time
+        if (stakedTokenSupply == 0) {
+            result.newLastRewardTime = uint32(block.timestamp > endTime ? endTime : block.timestamp);
+            return result;
+        }
+
+        // Calculate end point (not exceeding end time)
+        uint32 endPoint = uint32(block.timestamp > endTime ? endTime : block.timestamp);
+        
+        // If last reward time is greater than or equal to end point, no update needed
+        if (lastRewardTime >= endPoint) {
+            return result;
+        }
+        
+        // Calculate and update rewards
+        uint256 multiplier = getMultiplier(lastRewardTime, endPoint, startTime, endTime);
+        uint256 reward = multiplier * rewardPerSecond;
+        if (stakedTokenSupply > 0) {
+            uint256 addition = reward * precisionFactor / stakedTokenSupply;
+            result.newAccTokenPerShare = accTokenPerShare + addition;
+            result.pendingReward = userAmount * result.newAccTokenPerShare / precisionFactor - userRewardDebt + userPendingRewards;
+        }
+        result.newLastRewardTime = uint32(endPoint);
+
+        return result;
+    }
+
     function updatePool(
         uint256 accTokenPerShare,
         uint32 lastRewardTime,
@@ -99,53 +164,50 @@ library PoolLib {
         IERC20 /* stakedToken */,
         address payable caller
     ) internal view returns (uint256 newAccTokenPerShare, uint32 newLastRewardTime) {
-        newAccTokenPerShare = accTokenPerShare;
-        newLastRewardTime = lastRewardTime;
-
-        // If current time is less than or equal to last reward time, no update needed
-        if (block.timestamp <= lastRewardTime) {
-            return (newAccTokenPerShare, newLastRewardTime);
-        }
-
-        // If current time is less than start time, update last reward time to start time
-        if (block.timestamp < startTime) {
-            newLastRewardTime = startTime;
-            return (newAccTokenPerShare, newLastRewardTime);
-        }
-
-        // If last reward time is greater than or equal to end time, no update needed
-        if (lastRewardTime >= endTime) {
-            return (newAccTokenPerShare, newLastRewardTime);
-        }
-
-        // Get staked token supply based on token type
         uint256 stakedTokenSupply = LaunchPool(caller).totalStaked();
-
-        // If no staked tokens, only update last reward time
-        if (stakedTokenSupply == 0) {
-            newLastRewardTime = uint32(block.timestamp > endTime ? endTime : block.timestamp);
-            return (newAccTokenPerShare, newLastRewardTime);
-        }
-
-        // Calculate end point (not exceeding end time)
-        uint32 endPoint = uint32(block.timestamp > endTime ? endTime : block.timestamp);
         
-        // If last reward time is greater than or equal to end point, no update needed
-        if (lastRewardTime >= endPoint) {
-            return (newAccTokenPerShare, newLastRewardTime);
-        }
+        RewardCalculationResult memory result = calculateRewards(
+            accTokenPerShare,
+            lastRewardTime,
+            rewardPerSecond,
+            startTime,
+            endTime,
+            precisionFactor,
+            stakedTokenSupply,
+            0, // userAmount not needed for pool update
+            0, // userRewardDebt not needed for pool update
+            0  // userPendingRewards not needed for pool update
+        );
         
-        // Calculate and update rewards
-        uint256 multiplier = getMultiplier(lastRewardTime, endPoint, startTime, endTime);
-        uint256 reward = multiplier * rewardPerSecond;
-        if (stakedTokenSupply > 0) {
-            uint256 rewardWithPrecision = reward * precisionFactor;
-            uint256 addition = rewardWithPrecision / stakedTokenSupply;
-            newAccTokenPerShare = newAccTokenPerShare + addition;
-        }
-        newLastRewardTime = uint32(endPoint);
+        return (result.newAccTokenPerShare, result.newLastRewardTime);
+    }
 
-        return (newAccTokenPerShare, newLastRewardTime);
+    function calculatePendingRewards(
+        uint256 currentAccTokenPerShare,
+        uint256 rewardPerSecond,
+        uint256 precisionFactor,
+        uint256 stakedTokenSupply,
+        uint32 lastRewardTime,
+        uint32 startTime,
+        uint32 endTime,
+        uint256 userAmount,
+        uint256 userRewardDebt,
+        uint256 userPendingRewards
+    ) internal view returns (uint256) {
+        RewardCalculationResult memory result = calculateRewards(
+            currentAccTokenPerShare,
+            lastRewardTime,
+            rewardPerSecond,
+            startTime,
+            endTime,
+            precisionFactor,
+            stakedTokenSupply,
+            userAmount,
+            userRewardDebt,
+            userPendingRewards
+        );
+        
+        return result.pendingReward;
     }
 
     function getMultiplier(
