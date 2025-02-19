@@ -149,30 +149,8 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
     function getProject(uint32 _projectId) external view returns (ProjectInfo memory) {
         ProjectToken storage project = projects[_projectId];
         
-        string memory currentStatus;
-        bool isActive;
-        
-        if (project.status == ProjectStatus.DELISTED) {
-            currentStatus = "DELISTED";
-            isActive = false;
-        } else if (project.status == ProjectStatus.PAUSED) {
-            currentStatus = "PAUSED";
-            isActive = false;
-        } else if (project.status == ProjectStatus.READY) {
-            if (block.timestamp >= project.endTime) {
-                currentStatus = "ENDED";
-                isActive = false;
-            } else if (block.timestamp >= project.startTime) {
-                currentStatus = "ACTIVE";
-                isActive = true;
-            } else {
-                currentStatus = "READY";
-                isActive = false;
-            }
-        } else {
-            currentStatus = "STAGING";
-            isActive = false;
-        }
+        string memory currentStatus = _getProjectStatus(_projectId);
+        bool isActive = keccak256(bytes(currentStatus)) == keccak256(bytes("ACTIVE"));
 
         return ProjectInfo({
             rewardToken: project.rewardToken,
