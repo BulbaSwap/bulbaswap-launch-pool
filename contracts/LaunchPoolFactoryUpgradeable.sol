@@ -17,6 +17,12 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
     using PoolLib for mapping(uint32 => ProjectToken);
     using VersionLib for mapping(address => uint256);
 
+    // Pending owner for two-step ownership transfer
+    address private _pendingOwner;
+
+    event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
+    event OwnershipTransferCanceled(address indexed previousOwner, address indexed pendingOwner);
+
     // Version management
     uint256 public constant CURRENT_VERSION = 1;
     mapping(address => uint256) public poolVersions;
@@ -411,6 +417,38 @@ contract LaunchPoolFactoryUpgradeable is Initializable, OwnableUpgradeable, UUPS
         );
         project.endTime = uint32(block.timestamp);
         emit Events.ProjectStatusUpdated(_projectId, project.status);
+    }
+
+    /// @dev Override transferOwnership to implement two-step ownership transfer
+    function transferOwnership(address newOwner) public virtual override onlyOwner {
+        require(newOwner != address(0), "New owner is zero address");
+        require(newOwner != owner(), "New owner is current owner");
+        require(_pendingOwner == address(0), "Transfer already pending");
+        
+        _pendingOwner = newOwner;
+        emit OwnershipTransferStarted(owner(), newOwner);
+    }
+
+    /// @dev Accept ownership transfer
+    function acceptOwnership() public virtual {
+        require(msg.sender == _pendingOwner, "Only pending owner");
+        
+        _transferOwnership(_pendingOwner);
+        _pendingOwner = address(0);
+    }
+
+    /// @dev Cancel ownership transfer
+    function cancelOwnershipTransfer() public virtual onlyOwner {
+        require(_pendingOwner != address(0), "No pending transfer");
+        
+        address oldPendingOwner = _pendingOwner;
+        _pendingOwner = address(0);
+        emit OwnershipTransferCanceled(owner(), oldPendingOwner);
+    }
+
+    /// @dev Get pending owner address
+    function pendingOwner() public view virtual returns (address) {
+        return _pendingOwner;
     }
 
     /// @dev Prevents renouncing ownership since it would break the factory
